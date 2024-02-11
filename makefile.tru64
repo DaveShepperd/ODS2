@@ -30,5 +30,5 @@ direct.o : direct.c direct.h access.h fibdef.h descrip.h ssdef.h
 rms.o : rms.c rms.h direct.h access.h fibdef.h descrip.h ssdef.h
 	cc -c $(CCFLAGS) $(DEFS) rms.c
 
-ods2.o : ods2.c ssdef.h descrip.h access.h rms.h
+ods2.o : ods2.c ssdef.h descrip.h access.h rms.h version.h
 	cc -c $(CCFLAGS) $(DEFS) ods2.c

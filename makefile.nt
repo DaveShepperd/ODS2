@@ -1,7 +1,7 @@
 
 CCFLAGS = "-Oxs"
 
-DEFS = "-DVERSION=\"v1.4\""
+DEFS = 
 
 all : ods2
 
@@ -42,7 +42,7 @@ direct.obj : direct.c direct.h access.h fibdef.h descrip.h ssdef.h
 rms.obj : rms.c rms.h direct.h access.h fibdef.h descrip.h ssdef.h
 	$(CC) -c $(CCFLAGS) $(DEFS) rms.c
 
-ods2.obj : ods2.c ssdef.h descrip.h access.h rms.h
+ods2.obj : ods2.c ssdef.h descrip.h access.h rms.h version.h
 	$(CC) -c $(CCFLAGS) $(DEFS) ods2.c
 
 wnaspi32.lib : wnaspi32.def

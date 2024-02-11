@@ -1,0 +1,47 @@
+DEFS  = -DUSE_GETTIME
+DEFS += -DUSE_READLINE
+DEFS += -D_LARGEFILE64_SOURCE
+DEFS += -D_FILE_OFFSET_BITS=64
+DEFS += -DUSE_STRERROR
+DEFS += -DUSE_UTIME
+DEFS += -Dregister=""
+DEFS += -DEXTMAX=100
+#DEFS += -DDEBUG
+
+OPT = #-O
+DBG = -g
+WARN = -Wall -ansi -pedantic -Wwrite-strings
+STD = -std=gnu99 
+LIBS = -lreadline
+CC = gcc
+LD = gcc
+RM = rm
+
+CCFLAGS = $(OPT) $(DBG) $(WARN) $(STD) $(DEFS)
+
+OBJS = ods2.o rms.o direct.o update.o access.o device.o phyunix.o cache.o vmstime.o
+
+all : ods2
+
+clean :
+	$(RM) -f ods2 $(OBJS)
+
+clean_all :
+	$(RM) -f $(OBJS) ods2
+
+%.o : %.c
+	$(CC) -c $(CCFLAGS) $<
+
+ods2 : $(OBJS) makefile.linux
+	$(LD) $(DBG) -o $@ $(OBJS) $(LIBS)
+
+access.o : access.c ssdef.h access.h phyio.h makefile.linux
+cache.o : cache.c cache.h ssdef.h makefile.linux
+device.o : device.c ssdef.h access.h phyio.h makefile.linux
+direct.o : direct.c direct.h access.h fibdef.h descrip.h ssdef.h makefile.linux
+ods2.o : ods2.c ssdef.h descrip.h access.h rms.h phyio.h version.h makefile.linux
+phyunix.o : phyunix.c phyio.h ssdef.h makefile.linux
+rms.o : rms.c rms.h direct.h access.h fibdef.h descrip.h ssdef.h makefile.linux
+update.o : update.c ssdef.h access.h makefile.linux
+vmstime.o : vmstime.c vmstime.h makefile.linux
+
