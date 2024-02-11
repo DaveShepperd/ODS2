@@ -72,9 +72,28 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <ctype.h>
 #include <sys/stat.h>
+#if USE_STRERROR
+#include <errno.h>
+#endif
+#if USE_UTIME
+#include <utime.h>
+#endif
+#if USE_READLINE
+#include <readline/readline.h>
+#include <readline/history.h>
+#ifndef READLINE_HISTORY_FILENAME
+  #define READLINE_HISTORY_FILENAME ".ods2_history"	/* Filename of readline history file */
+#endif
+#ifndef READLINE_HISTORY_LINES
+  #define READLINE_HISTORY_LINES (256)				/* maximum number of lines maintained in history file */
+#endif
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 #ifdef VMSIO
 #include <ssdef.h>
@@ -107,13 +126,15 @@
 #include "phyio.h"
 #endif
 
+#include "version.h"
+
 #define PRINT_ATTR (FAB$M_CR | FAB$M_PRN | FAB$M_FTN)
 
 
 
 /* keycomp: routine to compare parameter to a keyword - case insensitive! */
 
-int keycomp(char *param,char *keywrd)
+int keycomp(char *param, const char *keywrd)
 {
     while (*param != '\0') {
         if (tolower(*param++) != *keywrd++) return 0;
@@ -124,7 +145,7 @@ int keycomp(char *param,char *keywrd)
 
 /* checkquals: routine to find a qualifer in a list of possible values */
 
-int checkquals(char *qualset[],int qualc,char *qualv[])
+int checkquals(const char * const qualset[],int qualc,char *qualv[])
 {
     int result = 0;
     while (qualc-- > 0) {
@@ -142,14 +163,48 @@ int checkquals(char *qualset[],int qualc,char *qualv[])
     return result;
 }
 
+static const char *getRfmAndRats(struct FAB *fab, char *ratsBuf, int ratsBufSize)
+{
+	static const char * const Rfms[] = 
+	{
+		 "UNDEF"	// 0
+		,"FIXED"	// 1
+		,"VAR"		// 2
+		,"VFC"		// 3
+		,"STREAM"	// 4
+		,"STREAM_LF"// 5
+		,"STREAM_CR"// 6
+	};
+	int rIdx = fab->fab$b_rfm;
+	int len;
+	if ( rIdx < 0 || rIdx > FAB$C_STMCR )
+		rIdx = 0;
+	len = 0;
+	if ( (fab->fab$b_rat&FAB$M_FTN) )
+		len += snprintf(ratsBuf+len,ratsBufSize-len,"%sFTN",len?"|":"");
+	if ( (fab->fab$b_rat&FAB$M_CR) )
+		len += snprintf(ratsBuf+len,ratsBufSize-len,"%sCR",len?"|":"");
+	if ( (fab->fab$b_rat&FAB$M_PRN) )
+		len += snprintf(ratsBuf+len,ratsBufSize-len,"%sPRN",len?"|":"");
+	if ( (fab->fab$b_rat&FAB$M_BLK) )
+		len += snprintf(ratsBuf+len,ratsBufSize-len,"%sBLK",len?"|":"");
+	if ( !len )
+		strncpy(ratsBuf,"NONE",ratsBufSize);
+	return Rfms[rIdx];
+}
 
 /* dir: a directory routine */
 
-char *dirquals[] = {"date","file","size",NULL};
+static const char * const dirquals[] = {"date","file","size","full",NULL};
+#define OPT_DIR_DATE	(1)
+#define OPT_DIR_FILE	(2)
+#define OPT_DIR_SIZE	(4)
+#define OPT_DIR_FULL	(8)
 
 unsigned dir(int argc,char *argv[],int qualc,char *qualv[])
 {
     char res[NAM$C_MAXRSS + 1],rsa[NAM$C_MAXRSS + 1];
+	char defaultName[] = "*.*;*";
     int sts,options;
     int filecount = 0;
     struct NAM nam = cc$rms_nam;
@@ -163,10 +218,12 @@ unsigned dir(int argc,char *argv[],int qualc,char *qualv[])
     dat.xab$l_nxt = &fhc;
     fab.fab$l_fna = argv[1];
     fab.fab$b_fns = strlen(fab.fab$l_fna);
-    fab.fab$l_dna = "*.*;*";
+    fab.fab$l_dna = defaultName;
     fab.fab$b_dns = strlen(fab.fab$l_dna);
     options = checkquals(dirquals,qualc,qualv);
-    sts = sys_parse(&fab);
+	if ( (options&OPT_DIR_FULL) )
+		options |= OPT_DIR_SIZE|OPT_DIR_DATE|OPT_DIR_FILE;
+	sts = sys_parse(&fab);
     if (sts & 1) {
         char dir[NAM$C_MAXRSS + 1];
         int namelen;
@@ -187,7 +244,7 @@ unsigned dir(int argc,char *argv[],int qualc,char *qualv[])
                 if (dirfiles > 0) {
                     if (printcol > 0) printf("\n");
                     printf("\nTotal of %d file%s",dirfiles,(dirfiles == 1 ? "" : "s"));
-                    if (options & 4) {
+                    if ( (options & OPT_DIR_SIZE) ) {
                         printf(", %d block%s.\n",dirblocks,(dirblocks == 1 ? "" : "s"));
                     } else {
                         fputs(".\n",stdout);
@@ -230,20 +287,21 @@ unsigned dir(int argc,char *argv[],int qualc,char *qualv[])
                     printf("Open error: %d\n",sts);
                 } else {
                     sts = sys_close(&fab);
-                    if (options & 2) {
+					if ( (options & OPT_DIR_FILE) ) {
                         char fileid[100];
-                        sprintf(fileid,"(%d,%d,%d)",
+                        snprintf(fileid,sizeof(fileid),"(%d,%d,%d)",
                                 (nam.nam$b_fid_nmx << 16) | nam.nam$w_fid_num,
                                 nam.nam$w_fid_seq,nam.nam$b_fid_rvn);
                         printf("  %-22s",fileid);
                     }
-                    if (options & 4) {
+                    if ( (options & OPT_DIR_SIZE) ) {
                         unsigned filesize = fhc.xab$l_ebk;
-                        if (fhc.xab$w_ffb == 0) filesize--;
+                        if (fhc.xab$w_ffb == 0)
+							filesize--;
                         printf("%9d",filesize);
                         dirblocks += filesize;
                     }
-                    if (options & 1) {
+                    if ( (options & OPT_DIR_DATE) ) {
                         char tim[24];
                         struct dsc_descriptor timdsc;
                         timdsc.dsc_w_length = 23;
@@ -253,7 +311,32 @@ unsigned dir(int argc,char *argv[],int qualc,char *qualv[])
                         tim[23] = '\0';
                         printf("  %s",tim);
                     }
-                    printf("\n");
+					if ( (options & OPT_DIR_FULL) )
+					{
+						uint64_t fSize;
+						char ratsBuf[100];
+						const char *rfmType;
+						rfmType = getRfmAndRats(&fab,ratsBuf,sizeof(ratsBuf));
+						fSize = fhc.xab$l_ebk;
+						if ( !fSize )
+							++fSize;
+						fSize *= 512;
+						fSize += fhc.xab$w_ffb-512;
+						printf("\n\tfab: fns=%d, dns=%d, alq=%d, deq=%d, mrs=%d, org=%d, rat=0x%X(%s), rfm=%d(%s), size in bytes: %lu."
+							   ,fab.fab$b_fns	// Filespec size
+							   ,fab.fab$b_dns	// Filespec size
+							   ,fab.fab$l_alq	// Allocation qty (blocks)
+							   ,fab.fab$w_deq	// Extension qty (blocks)
+							   ,fab.fab$w_mrs	// Maximum record size
+							   ,fab.fab$b_org	// File organization
+							   ,fab.fab$b_rat	// Record attributes
+							   ,ratsBuf
+							   ,fab.fab$b_rfm	// Record format
+							   ,rfmType
+							   ,fSize			// File size in bytes
+							   );
+					}
+					printf("\n");
                 }
             }
             dirfiles++;
@@ -262,7 +345,7 @@ unsigned dir(int argc,char *argv[],int qualc,char *qualv[])
         if (printcol > 0) printf("\n");
         if (dirfiles > 0) {
             printf("\nTotal of %d file%s",dirfiles,(dirfiles == 1 ? "" : "s"));
-            if (options & 4) {
+            if ( (options & OPT_DIR_SIZE)) {
                 printf(", %d block%s.\n",dirblocks,(dirblocks == 1 ? "" : "s"));
             } else {
                 fputs(".\n",stdout);
@@ -273,7 +356,7 @@ unsigned dir(int argc,char *argv[],int qualc,char *qualv[])
                 printf("\nGrand total of %d director%s, %d file%s",
                        dircount,(dircount == 1 ? "y" : "ies"),
                        filecount,(filecount == 1 ? "" : "s"));
-                if (options & 4) {
+                if ( (options & OPT_DIR_SIZE) ) {
                     printf(", %d block%s.\n",totblocks,(totblocks == 1 ? "" : "s"));
                 } else {
                     fputs(".\n",stdout);
@@ -294,13 +377,26 @@ unsigned dir(int argc,char *argv[],int qualc,char *qualv[])
 
 #define MAXREC 32767
 
-char *copyquals[] = {"binary",NULL};
+static const char * const copyquals[] = {"binary","dir","ignore","quiet","stream","test","time","vfc","verbose",NULL};
+#define OPT_COPY_BINARY		(0x001)	/* Copy binary mode */
+#define OPT_COPY_DIRS   	(0x002)	/* Go ahead and copy the .dir files as well as making directories */
+#define OPT_COPY_IGNORE		(0x004)	/* Ignore record count errors. Keep reading/writing if one found */
+#define OPT_COPY_QUIET		(0x008)	/* No squawking about the copy except if errors */
+#define OPT_COPY_STREAM		(0x010)	/* Ignore record handling in stream files. Treat them as raw data. */
+#define OPT_COPY_TEST		(0x020)	/* Just test the copy procedure */
+#define OPT_COPY_TIME		(0x040)	/* Include timestamps on file creation */
+#define OPT_COPY_VFC		(0x080)	/* Interpret carriage control on VFC formatte files */
+#define OPT_COPY_VERBOSE	(0x100)	/* Squawk what is being done */
 
 unsigned copy(int argc,char *argv[],int qualc,char *qualv[])
 {
-    int sts,options;
+    int sts,options,testMode,doBinary;
+	char errMsg[128];
+	unsigned char vfcs[2];
     struct NAM nam = cc$rms_nam;
     struct FAB fab = cc$rms_fab;
+	struct XABDAT dat = cc$rms_xabdat;
+	struct XABFHC fhc = cc$rms_xabfhc;
     char res[NAM$C_MAXRSS + 1],rsa[NAM$C_MAXRSS + 1];
     int filecount = 0;
     nam.nam$l_esa = res;
@@ -308,48 +404,77 @@ unsigned copy(int argc,char *argv[],int qualc,char *qualv[])
     fab.fab$l_nam = &nam;
     fab.fab$l_fna = argv[1];
     fab.fab$b_fns = strlen(fab.fab$l_fna);
+	fab.fab$l_xab = &dat;
+	dat.xab$l_nxt = &fhc;
     options = checkquals(copyquals,qualc,qualv);
-    sts = sys_parse(&fab);
+	if ( (options&OPT_COPY_TEST) )
+		options &= ~OPT_COPY_QUIET;	/* If /test option, then always disable /quiet */
+	sts = sys_parse(&fab);
     if (sts & 1) {
         nam.nam$l_rsa = rsa;
         nam.nam$b_rss = NAM$C_MAXRSS;
         fab.fab$l_fop = FAB$M_NAM;
         while ((sts = sys_search(&fab)) & 1) {
             sts = sys_open(&fab);
+			testMode = (options&OPT_COPY_TEST) ? 1 : 0;
             if ((sts & 1) == 0) {
+                /* Have to call perror first since printf will clobber errno. Not VMS display order, but oh well */
                 printf("%%COPY-F-OPENFAIL, Open error: %d\n",sts);
-                perror("-COPY-F-ERR ");
+				sys_error_str(sts,errMsg,sizeof(errMsg)-1);
+				errMsg[sizeof(errMsg)-1] = 0;
+				printf("-COPY-F-ERR: %s\n", errMsg);
             } else {
                 struct RAB rab = cc$rms_rab;
                 rab.rab$l_fab = &fab;
                 if ((sts = sys_connect(&rab)) & 1) {
-                    FILE *tof;
-                    char name[NAM$C_MAXRSS + 1];
-                    unsigned records = 0;
-                    {
-                        char *out = name,*inp = argv[2];
-                        int dot = 0;
-                        if ((strncmp(inp,"[*]",3) == 0) && (nam.nam$b_dir > 0))
-                        {
-                            char *tmp = nam.nam$l_dir;
-                            int i;
-                            for(i=0;i<nam.nam$b_dir;i++)
-                            {
-                                if ((*tmp == '.') || (*tmp == ']'))
-                                {
-                                    *out = 0;
-                                    mkdir(name,0777);
-                                    *out++ = '/';
-                                }
-                                else if ( *tmp != '[' )
-                                {
-                                    *out++ = *tmp;
-                                }
-                                if ( *tmp++ == ']' )
-                                    break;
-                            }
-                            inp += 3;
-                        }
+					FILE *tof;
+					char name[NAM$C_MAXRSS + 1];
+					unsigned records = 0, badRecords=0;
+					char *out = name,*inp = argv[2];
+					int dot = 0;
+
+					if ( !nam.nam$b_name && nam.nam$b_type <= 1 )
+					{
+						/* Skip files with blank name and type */
+						sys_close(&fab);
+						continue;
+					}
+					if ((strncmp(inp,"[*]",3) == 0) && (nam.nam$b_dir > 0))
+					{
+						char *tmp = nam.nam$l_dir;
+						int i;
+						for(i=0;i<nam.nam$b_dir;i++)
+						{
+							if ((*tmp == '.') || (*tmp == ']'))
+							{
+								struct stat st;
+								*out = 0;
+								if ( stat(name,&st) || !S_ISDIR(st.st_mode) )
+								{
+									if ( !testMode )
+									{
+										if ( mkdir(name, 0777) )
+										{
+											printf("%%COPY-E-MKDIR, failed mkdir('%s')\n",name);
+											sys_error_str(sts,errMsg,sizeof(errMsg)-1);
+											errMsg[sizeof(errMsg)-1] = 0;
+											printf("-COPY-I-ERR: %s\n", errMsg);
+										} else if ( (options&OPT_COPY_VERBOSE) )
+												printf("%%COPY-I-MKDIR, Created directory '%s'\n",name);
+									}
+									else if ( !(options&OPT_COPY_QUIET) )
+										printf("%%COPY-I-INFO, Would have created directory: %s\n", name);
+								}
+								*out++ = '/';
+							}
+							else if ( *tmp != '[' )
+							{
+								*out++ = *tmp;
+							}
+							if ( *tmp++ == ']' )
+								break;
+						}
+						inp += 3;
                         while (*inp != '\0') {
                             if (*inp == '*') {
                                 inp++;
@@ -373,49 +498,359 @@ unsigned copy(int argc,char *argv[],int qualc,char *qualv[])
                         }
                         *out++ = '\0';
                     }
+                    if ( !(options&OPT_COPY_DIRS) )
+                    {
+                        char *verPtr,*extPtr;
+    					verPtr = strrchr(name,';');
+    					if ( verPtr )
+    						*verPtr = 0;
+    					extPtr = strrchr(name,'.');
+    					if ( extPtr && !strcmp(extPtr,".DIR") )
+    					{
+    						if ( 0 && !(options&OPT_COPY_QUIET) )
+    						{
+    							printf("%%COPY-W-NFG, %s attempted creation of directory file: '%s'\n",
+    								   testMode ? "Would have skipped":"Skipped",
+    								   name);
+    						}
+    						testMode = 3;
+    					}
+    					if ( verPtr ) {
+    						*verPtr = ';';
+						}
+                    }
+					tof = NULL;
+					if ( !testMode )
+					{
 #ifndef _WIN32
-                    tof = fopen(name,"w");
+						tof = fopen(name,"w");
 #else
-		    if ((options & 1) == 0 && fab.fab$b_rat & PRINT_ATTR) {
-                        tof = fopen(name,"w");
-		    } else {
-		        tof = fopen(name,"wb");
-		    }
+						if ((options & OPT_COPY_BINARY) == 0 && (fab.fab$b_rat & PRINT_ATTR)) {
+									tof = fopen(name,"w");
+						} else {
+							tof = fopen(name,"wb");
+						}
 #endif
-                    if (tof == NULL) {
-                        printf("%%COPY-F-OPENOUT, Could not open %s\n",name);
-                        perror("-COPY-F-ERR ");
+					}
+					doBinary = 0;
+                    if ( !testMode && tof == NULL) {
+						perror("%COPY-F-FOPEN, ");
+                        printf("-COPY-I-FOPEN, Could not open %s\n",name);
                     } else {
-                        char rec[MAXREC + 2];
-                        filecount++;
-                        rab.rab$l_ubf = rec;
-                        rab.rab$w_usz = MAXREC;
+						int totWrite=0;
+						char realRec[2+MAXREC+128];	/* record buff is large enough to hold all potential vfc characters */
+						char *rec, *recPtr;
+						
                         SCacheEna = 0;
-                        while ((sts = sys_get(&rab)) & 1) {
-                            unsigned rsz = rab.rab$w_rsz;
-                            if ((options & 1) == 0 &&
-                                 fab.fab$b_rat & PRINT_ATTR) rec[rsz++] = '\n';
-                            if (fwrite(rec,rsz,1,tof) == 1) {
-                                records++;
-                            } else {
-                                printf("%%COPY-F- fwrite error!!\n");
-                                perror("-COPY-F-ERR ");
-                                break;
-                            }
-                        }
-                        SCacheEna = 1;
-                        if (fclose(tof)) {
-                            printf("%%COPY-F- fclose error!!\n");
-                            perror("-COPY-F-ERR ");
-                        }
+						sts = RMS$_EOF;
+						if ( testMode < 3 )
+						{
+							int doRat;
+							
+							rec = realRec+2;	/* Leave two bytes in front as room for potential vfc record leader */
+							recPtr = rec;
+							rab.rab$l_ubf = rec;
+							rab.rab$w_usz = MAXREC;
+							/* Tell sys_get() whether /stream option set */
+							rab.rab$w_flg  = (options & OPT_COPY_STREAM) ? RAB$M_SPC : 0;
+							/* Tell sys_get() whether /ignore option set */
+							rab.rab$w_flg |= (options & OPT_COPY_IGNORE) ? RAB$M_FAL : 0;
+							/* Tell sys_get() whether /vfc option set */
+							filecount++;
+							switch (fab.fab$b_rfm)
+							{
+								case FAB$C_STMLF:
+								case FAB$C_STMCR:
+								case FAB$C_STM:
+									doRat = 0; //(options & OPT_COPY_STREAM) ? 0 : (fab.fab$b_rat& PRINT_ATTR);
+									break;
+								case FAB$C_VAR:
+									doBinary = !(fab.fab$b_rat& PRINT_ATTR);
+									// Fall through to VFC
+								case FAB$C_VFC:
+									doRat = (fab.fab$b_rat& PRINT_ATTR);
+									break;
+								default:
+									doRat = 0; //(fab.fab$b_rat& PRINT_ATTR);
+									break;
+							}
+							if ( (options & OPT_COPY_VFC) && fab.fab$b_rfm == FAB$C_VFC && doRat )
+							{
+								if ( fab.fab$b_fsz && fab.fab$b_fsz != 2 )
+									printf("%%COPY-W-VFC, file's VFC size is %d. Only a size of 2 is supported\n", fab.fab$b_fsz );
+								else
+									rab.rab$l_rhb = (char *)vfcs;
+							}
+							if ( (options&OPT_COPY_VERBOSE) )
+							{
+								printf("%%COPY-I-OPEN, Opened '%s' for output. testMode=%d. rfm=0x%X, rat=0x%X, doRat=%d, rab$l_rhb=%p\n",
+									   name, testMode, fab.fab$b_rfm, fab.fab$b_rat, doRat, (void *)rab.rab$l_rhb );
+							}
+							while ( (sts = sys_get(&rab)) & 1 )
+							{
+								unsigned rsz = rab.rab$w_rsz;
+								recPtr = rec;
+								if ( (options&OPT_COPY_VERBOSE) )
+								{
+									printf("%%COPY-I-READ, sys_get() returned %d. rsz=%d\n", sts, rsz );
+								}
+								if ( rsz <= rab.rab$w_usz )
+								{
+									if ( tof )
+									{
+										if ( doRat && !(options & OPT_COPY_BINARY) && !(rab.rab$w_flg & RAB$M_RCE) )
+										{
+											if ( !rab.rab$l_rhb )
+											{
+												/* Not VFC */
+												if ( (fab.fab$b_rat & PRINT_ATTR) )
+												{
+													/* Tack a newline to end of record */
+													rec[rsz] = '\n';
+													++rsz;
+												}
+											}
+											else
+											{
+												unsigned char vfc0, vfc1;
+												vfc0 = vfcs[0];
+												vfc1 = vfcs[1];
+												/* Here's an attempt at handling fortran carriage control */
+												/* vfc0 spec. Char has:
+												 *  0  - (as in nul) no carriage control
+												 * ' ' - (space) Normal: \n followed by text followed by \r
+												 * '$' - Prompt: \n followed by text, no \r at end of line
+												 * '+' - Overstrike: text followed by \r
+												 * '0' - Double space: \n \n followed by text followed by \r
+												 * '1' - Formfeed: \f followed by text followed by \r
+												 * any - any other is same as Normal above 
+												 * Despite the comments above about the end-of-record
+												 * char, it is determined by vfc1 and handled separately below.
+												 */
+												switch (vfc0)
+												{
+												case 0:				/* No carriage control at all on this record */
+													break;
+												default:
+												case ' ':			/* normal. \n text \cr */
+													recPtr = realRec+1;
+													*recPtr = '\n';
+													++rsz;
+													break;
+												case '$':			/* Prompt: \n - buffer */
+													recPtr = realRec+1;
+													*recPtr = '\n';
+													++rsz;
+													break;
+												case '+':			/* Overstrike: buffer - \r */
+													break;
+												case '0':			/* Double space: \n\n text \r */
+													recPtr = realRec;
+													recPtr[0] = '\n';
+													recPtr[1] = '\n';
+													rsz += 2;
+													break;
+												case '1':
+													recPtr = realRec+1;
+													*recPtr = '\f';
+													++rsz;
+													break;
+												}
+												/* vfc1 spec. Bits:
+												 * 7 6 5 4 3 2 1 0
+												 * 0 0 0 0 0 0 0 0 - no trailing character
+												 * 0 x x x x x x x - bits 6-0 indicate how many nl's to output followed by a cr
+												 * 1 0 0 x x x x x - bits 4-0 describe the end-of-record char (normally a 0x0D
+												 * 1 0 1 x x x x x - all other conditions = just one cr
+												 * 1 1 0 0 x x x x - bits 3-0 describe bits to send to VFU. If no VFU, just one cr 
+												 * 1 1 0 1 x x x x - all other conditions = just one cr
+												 * 1 1 1 x x x x x - all other conditions = just one cr
+												 */
+												if ( vfc1 )
+												{
+													int code = (vfc1>>5)&7;	/* get top 3 bits of vfc1 */
+													switch (code)
+													{
+													case 0:
+													case 1:
+													case 2:
+													case 3:
+														memset(recPtr + rsz, '\n', vfc1);   /*fill end of record with nl's */
+														rsz += vfc1;			/* advance count */
+														recPtr[rsz] = '\r';		/* follow all that with a cr */
+														++rsz;					/* advance count */
+														break;
+													case 4:
+														recPtr[rsz] = vfc1&0x1F;	/* Follow record with this control code */
+														++rsz;					/* advance count */
+														break;
+													case 5: /* Not used*/
+													case 6: /* special VFU stuff (not used) */
+													case 7:	/* Not used */
+														recPtr[rsz] = '\r';		/* Follow record with cr */
+														++rsz;					/* advance count */
+														break;
+													}
+												}
+//												if ( vfc0 != 1 || vfc1 != 0x8D )
+//													printf("Did VFC processing. vfc0=0x%02X, vfc1=0x%02X, code=%d, rsz=%d\n", vfc0, vfc1, vfc1>>5, rsz);
+											}
+										}
+										if ( doBinary )
+										{
+											unsigned char rcnt[2];
+											rcnt[0] = rsz&0xFF;
+											rcnt[1] = (rsz>>8)&0xFF;
+											if ( fwrite(rcnt, 1, 2, tof) != 2 )
+											{
+												perror("%COPY-F-FWRITE ");
+												printf("-COPY-I-FWRITE of record size failed!!\n");
+												break;
+											}
+											totWrite += 2;
+											if ( rab.rab$l_rhb )
+											{
+												if ( fwrite(rab.rab$l_rhb, 1, 2, tof) != 2 )
+												{
+													perror("%COPY-F-FWRITE ");
+													printf("-COPY-I-FWRITE of vfc bytes failed!!\n");
+													break;
+												}
+												totWrite += 2;
+											}
+										}
+										if ( rsz )
+										{
+											if ( fwrite(recPtr, 1, rsz, tof) != rsz )
+											{
+												perror("%COPY-F-FWRITE ");
+												printf("-COPY-I-FWRITE of record failed!!\n");
+												break;
+											}
+											totWrite += rsz;
+										}
+										if ( doBinary && (rsz&1) )
+										{
+											unsigned char rcnt[2];
+											rcnt[0] = 0;
+											if ( fwrite(rcnt, 1, 1, tof) != 1 )
+											{
+												perror("%COPY-F-FWRITE ");
+												printf("-COPY-I-FWRITE of alignment byte failed!!\n");
+												break;
+											}
+											totWrite += 1;
+										}
+									}
+									if ( !(rab.rab$w_flg & RAB$M_RCE) )
+										records++;
+									else
+										++badRecords;
+									if ( tof && (options&OPT_COPY_VERBOSE) )
+									{
+										unsigned char *uRecPtr = (unsigned char *)recPtr;
+										printf("%%COPY-I-WRITE, wrote a total of %d(0x%X) bytes. rsz=%d(0x%X), doBinary=%d. goodRecords=%d, badRecords=%d\n",
+											   totWrite, totWrite, rsz, rsz, doBinary, records, badRecords );
+										printf("\tbuff (%p): %02X %02X %02X %02X %02X %02X %02X %02X\n",
+											   (void *)uRecPtr, uRecPtr[0], uRecPtr[1], uRecPtr[2], uRecPtr[3], uRecPtr[4], uRecPtr[5], uRecPtr[6], uRecPtr[7]);
+											   
+									}
+								} else {
+									++badRecords;
+								}
+							}
+						}
+						SCacheEna = 1;
+						if ( tof ) {
+							if ( fclose(tof) )
+							{
+								perror("%COPY-F-FCLOSE ");
+								printf("-COPY-I-FCLOSE error!!\n");
+							}
+							else if ( (options&OPT_COPY_VERBOSE) )
+								printf("%%COPY-I-CLOSE, Closed output file '%s'\n", name);
+#if USE_UTIME
+							else if ( (options&OPT_COPY_TIME) )
+							{
+								struct utimbuf utb;
+								utb.actime = utb.modtime = vmstime_to_unix(dat.xab$q_cdt);
+								if ( utb.actime )
+								{
+									if ( utime(name,&utb) < 0 )
+									{
+										char errMsg[128];
+										sys_error_str(sts,errMsg,sizeof(errMsg));
+										printf("%%COPY-E-utime(): Asctim error: %d\n",sts);
+										printf("%%COPY-I-utime: %s\n", errMsg);
+									}
+									else if ( (options&OPT_COPY_VERBOSE) )
+										printf("%%COPY-I-TIME, Reset times on '%s' to %lu\n", name, utb.actime );
+								}
+							}
+#endif
+							if ( doBinary || ((rab.rab$w_flg & (RAB$M_FAL | RAB$M_RCE)) == (RAB$M_FAL | RAB$M_RCE)) )
+							{
+								char *newFName;
+								int sLen = strlen(name)+128;
+								newFName = (char *)malloc(sLen);
+								if ( newFName )
+								{
+									newFName[0] = 0;
+									strncat(newFName,name,sLen);
+									if ( doBinary )
+										strncat(newFName,".binary",sLen);
+									if ( (rab.rab$w_flg & (RAB$M_FAL | RAB$M_RCE)) == (RAB$M_FAL | RAB$M_RCE) )
+									{
+										int nLen = strlen(newFName);
+										snprintf(newFName+nLen,sLen-nLen,"_corrupt_at_offset_%d",rab.rab$l_tot);
+									}
+									if ( rename(name,newFName) < 0 )
+									{
+#if USE_STRERROR
+										printf("%%COPY-E-Rename, Failed to rename '%s' to '%s': %s\n",name, newFName, strerror(errno));
+#else
+										perror("%COPY-E-Rename, failed to rename");
+#endif
+									}
+									else if ( (options&OPT_COPY_VERBOSE) )
+										printf("%%COPY-W-RENAME, Renamed '%s' to '%s' due to errors\n", name, newFName );
+									free(newFName);
+								}
+							}
+							tof = NULL;
+						}
                     }
                     sys_disconnect(&rab);
                     rsa[nam.nam$b_rsl] = '\0';
                     if (sts == RMS$_EOF) {
-                        printf("%%COPY-S-COPIED, %s copied to %s (%d record%s)\n",
-                               rsa,name,records,(records == 1 ? "" : "s"));
+						if ( testMode < 3 )
+						{
+							const char *goodPlural=(records == 1 ? "" : "s");
+							if ( badRecords )
+							{
+								const char *badPlural=(badRecords == 1 ? "" : "s");
+								const char *const Fmts[] =
+								{
+								"%%COPY-W-COPIED, %s copied to %s (%d good record%s, %d bad record%s)\n",
+								"%%COPY-I-NOT_COPIED, would have copied %s to %s (%d good record%s, %d bad record%s)\n"
+								};
+								printf(Fmts[(options&OPT_COPY_TEST)?1:0], rsa,name,records,goodPlural,badRecords,badPlural);
+								if ( (rab.rab$w_flg&RAB$M_FAL) )
+									printf("-COPY-W-REC, First bad record count starts at offset %u\n", rab.rab$l_tot);
+							} else if ( !(options&OPT_COPY_QUIET) ) {
+								const char *const Fmts[] =
+								{
+								"%%COPY-S-COPIED, %s copied to %s (%d record%s)\n",
+								"%%COPY-I-NOT_COPIED, would have copied %s to %s (%d record%s)\n"
+								};
+								printf(Fmts[(options&OPT_COPY_TEST)?1:0], rsa,name,records,goodPlural);
+							}
+						}
                     } else {
-                        printf("%%COPY-F-ERROR Status: %d for %s\n",sts,rsa);
+						char ratsBuf[128];
+						const char *rfm;
+						rfm = getRfmAndRats(&fab,ratsBuf,sizeof(ratsBuf));
+                        printf("%%COPY-F-getRfmAndRats: %d for %s, rfm=%s, rat=%s\n",sts,rsa,rfm,ratsBuf);
                         sts = 1;
                     }
                 }
@@ -424,11 +859,18 @@ unsigned copy(int argc,char *argv[],int qualc,char *qualv[])
         }
         if (sts == RMS$_NMF) sts = 1;
     }
-    if (sts & 1) {
-        if (filecount > 0) printf("%%COPY-S-NEWFILES, %d file%s created\n",
+    if ( (sts & 1) ) {
+        if (filecount > 0)
+			printf("%%COPY-S-NEWFILES, %d file%s created\n",
                                   filecount,(filecount == 1 ? "" : "s"));
     } else {
-        printf("%%COPY-F-ERROR Status: %d\n",sts);
+		char errMsg[128];
+		sys_error_str(sts,errMsg,sizeof(errMsg));
+        printf("%%COPY-F-PARSE. Status: %d\n"
+			   "%%COPY-I-PARSE, %s\n",
+			    sts
+			   ,errMsg
+			   );
     }
     return sts;
 }
@@ -561,6 +1003,7 @@ unsigned typ(int argc,char *argv[],int qualc,char *qualv[])
 
 unsigned search(int argc,char *argv[],int qualc,char *qualv[])
 {
+	char defaultName[] = "";
     int sts = 0;
     int filecount = 0;
     int findcount = 0;
@@ -584,7 +1027,7 @@ unsigned search(int argc,char *argv[],int qualc,char *qualv[])
     fab.fab$l_nam = &nam;
     fab.fab$l_fna = argv[1];
     fab.fab$b_fns = strlen(fab.fab$l_fna);
-    fab.fab$l_dna = "";
+    fab.fab$l_dna = defaultName;
     fab.fab$b_dns = strlen(fab.fab$l_dna);
     sts = sys_parse(&fab);
     if (sts & 1) {
@@ -825,8 +1268,7 @@ unsigned dodismount(int argc,char *argv[],int qualc,char *qualv[])
 }
 
 
-
-char *mouquals[] = {"write",NULL};
+static const char * const mouquals[] = {"write",NULL};
 
 unsigned domount(int argc,char *argv[],int qualc,char *qualv[])
 {
@@ -905,12 +1347,59 @@ unsigned help(int argc,char *argv[],int qualc,char *qualv[])
     printf(" Please send problems/comments to Paulnank@au1.ibm.com\n");
     printf(" Commands are:\n");
     printf("  copy        difference      directory     exit\n");
-    printf("  mount       show_default    show_time     search\n");
-    printf("  set_default type\n");
-    printf(" Example:-\n    $ mount e:\n");
+    printf("  help        mount           show          search\n"
+		   "  set         type\n"
+		   " Where:\n"
+		   );
+	printf("  copy [options] <from_VMS> <to_localhost>\n"
+		   "      options can be zero or more of:\n"
+		   "         /binary  - indicating to copy file(s) as binary.\n"
+		   "         /dirs    - copy .DIR files as well as making directories.\n"
+		   "         /ignore  - ignore errors and keep reading file(s)\n"
+		   "         /quiet   - copy without much squawking.\n"
+		   "         /stream  - copy stream files as raw data.\n"
+		   "         /test    - don't copy, but instead show what would have been done.\n"
+		   "         /time    - copy creation and modification times to destination file too.\n"
+		   "         /vfc     - interpret the carriage control on VFC formatted files.\n"
+		   "      <from_VMS>:\n"
+		   "         is a filename in the VMS syntax\n"
+		   "      <to_localhost>:\n"
+		   "         is a filename in the VMS syntax but what will be written\n"
+		   );
+	printf(" difference <file1> <file2>\n"
+		   "    Displays the difference between two files\n"
+		   );
+	printf(" directory [options] <file>\n"
+		   "    Displays the directory contents and/or file details.\n"
+		   "    options can be zero or more of:\n"
+		   "    /date       - show dates\n"
+		   "    /size       - show sizes\n"
+		   "    /file       - show internal file ID's\n"
+		   "    /full       - show all details of file (forces /date/size/file)\n"
+		   "    <file>      - is the VMS specification of file and/or directory. Can include wildcards\n"
+		   );
+	printf(" exit\n"
+		   "    Quietly quit the program.\n"
+		   );
+	printf(" help\n"
+		   "    Displays this message.\n"
+		   );
+	printf(" mount file0 <...filen>\n"
+		   "    Mounts file(s). Multiple files are expected to be volume sets (not checked).\n"
+		   "    NOTE: On Unix (like) systems, filename cannot contain '/' characters.\n"
+		   "          Suggest using symlinks as a workaround.\n"
+		   );
+    printf(" Examples:\n"
+		   "    $ mount e:       (Mounts DOS/Windows physical disk E:)\n"
+		   "    $ mount disk.img (Mounts virtual disk image)\n"
+		   );
     printf("    $ search e:[vms_common.decc*...]*.h rms$_wld\n");
     printf("    $ set default e:[sys0.sysmgr]\n");
-    printf("    $ copy *.com;-1 c:\\*.*\n");
+    printf("    $ copy *.com;-1 c:\\*.* (copies from -> to)\n");
+	printf("    $ copy /quiet/time [*...]*.* [*]*.*  (copy all files while maintaing directory hierarchy)\n");
+	printf("    $ copy/binary *.bin;-1 c:\\*.* (copy files in binary)\n");
+	printf("    $ copy/quiet *.bin;-1 c:\\*.* (copy files quietly except for errors)\n");
+	printf("    $ copy/test from-bla-bla  to-bla-bla  (just reports what it would have copied)\n");
     printf("    $ directory/file/size/date [-.sys*...].%%\n");
     printf("    $ exit\n");
     return 1;
@@ -919,8 +1408,8 @@ unsigned help(int argc,char *argv[],int qualc,char *qualv[])
 
 /* informaion about the commands we know... */
 
-struct CMDSET {
-    char *name;
+const struct CMDSET {
+    const char *name;
     unsigned (*proc) (int argc,char *argv[],int qualc,char *qualv[]);
     int minlen;
     int minargs;
@@ -928,7 +1417,7 @@ struct CMDSET {
     int maxquals;
 } cmdset[] = {
     {
-        "copy",copy,3,3,3,1
+        "copy",copy,3,3,3,10
 },
     {
         "import",import,3,3,3,0
@@ -991,7 +1480,7 @@ struct CMDSET {
 int cmdexecute(int argc,char *argv[],int qualc,char *qualv[])
 {
     char *ptr = argv[0];
-    struct CMDSET *cmd = cmdset;
+    const struct CMDSET *cmd = cmdset;
     unsigned cmdsiz = strlen(ptr);
     while (*ptr != '\0') {
         *ptr = tolower(*ptr);
@@ -1030,10 +1519,11 @@ int cmdexecute(int argc,char *argv[],int qualc,char *qualv[])
 int cmdsplit(char *str)
 {
     int argc = 0,qualc = 0;
-    char *argv[32],*qualv[32];
+    char *argv[32],*qualv[32], empty[]="";
     char *sp = str;
     int i;
-    for (i = 0; i < 32; i++) argv[i] = qualv[i] = "";
+    for (i = 0; i < 32; i++)
+		argv[i] = qualv[i] = empty;
     while (*sp != '\0') {
         while (*sp == ' ') sp++;
         if (*sp != '\0') {
@@ -1096,12 +1586,104 @@ char *getcmd(char *inp, char *prompt)
 
 /* main: the simple mainline of this puppy... */
 
+#if defined(READLINE_HISTORY_FILENAME) && READLINE_HISTORY_LINES
+static void preLoadHistory(void)
+{
+	struct stat st;
+	int sts;
+	/* Start with details of history file */
+	sts = stat(READLINE_HISTORY_FILENAME,&st);
+	if ( sts )
+	{
+		perror("Unable to stat " READLINE_HISTORY_FILENAME ":");
+		return;
+	}
+	if ( st.st_size > 0 )
+	{
+		char **lines;
+		/* Get a place to drop pointers into pre-initialised to NULL */
+		lines = (char **)calloc(READLINE_HISTORY_LINES,sizeof(char *));
+		/* Get a place to read the entire history file into */
+		char *buff = (char *)malloc(st.st_size+1);
+		if ( buff && lines )
+		{
+			int ifd;
+			/* Open the history file */
+			ifd = open(READLINE_HISTORY_FILENAME,O_RDONLY);
+			if ( ifd >= 0 )
+			{
+				/* Read the entire history file */
+				sts = read(ifd,buff,st.st_size);
+				if ( sts > 0 )
+				{
+					int ii,index=0;
+					char *linePtr = buff;
+					/* make sure there's a nul at the end of the buffer */
+					buff[sts] = 0;
+					/* loop through the text isolating and saving pointers to line starts */
+					while ( linePtr < buff+st.st_size && *linePtr )
+					{
+						char *lineEnd;
+
+						/* save the line start */
+						lines[index] = linePtr;
+						/* advance the line index */
+						++index;
+						/* wrap if necessary */
+						if ( index >= READLINE_HISTORY_LINES )
+							index = 0;
+						/* find the end of the line */
+						lineEnd = strchr(linePtr,'\n');
+						if ( !lineEnd )
+							break;	/* No end of line, so we're done */
+						/* replace the newline with a nul */
+						*lineEnd = 0;
+						/* point to next line */
+						linePtr = lineEnd+1;
+					}
+					/* Loop through the saved line pointers and put them in the history */
+					/* Although we start by putting the lines into history earliest to latest */
+					for (ii=0; ii < READLINE_HISTORY_LINES; ++ii)
+					{
+						linePtr = lines[index];
+						if ( linePtr )
+							add_history(linePtr);
+						++index;
+						if ( index >= READLINE_HISTORY_LINES )
+							index = 0;
+					}
+				}
+			}
+			close(ifd);
+		}
+		if ( lines )
+			free(lines);
+		if ( buff )
+			free(buff);
+	}
+}
+
+static void add_to_history_file(char *ptr)
+{
+	FILE *ofp = fopen(READLINE_HISTORY_FILENAME,"a");
+	if ( ofp )
+	{
+		fprintf(ofp,"%s\n",ptr);
+		fclose(ofp);
+	}
+}
+#endif	/* READLINE_HISTORY_xxx */
+
 int main(int argc,char *argv[])
 {
 #define STRSIZE 2048
     char str[STRSIZE];
     FILE *atfile = NULL;
-    printf(" ODS2 %s\n", VERSION);
+
+	printf(" ODS2 %s\n", VERSION);
+#if defined(READLINE_HISTORY_FILENAME) && READLINE_HISTORY_LINES
+	preLoadHistory();
+#endif
     while (1) {
         char *ptr;
         if (atfile != NULL) {
@@ -1116,12 +1698,30 @@ int main(int argc,char *argv[])
             }
         } else {
 #ifdef VMS
-	    if (getcmd (str, "$> ") == NULL) break;
+			if (getcmd (str, "$> ") == NULL) break;
 #else
+#if !USE_READLINE
             printf("$> ");
             if (fgets(str,STRSIZE,stdin) == NULL) break;
             ptr = strchr(str,'\n');
             if (ptr != NULL) *ptr = '\0';
+#else	/* USE_READLINE */
+			char *tptr;
+			if ( !(ptr = readline("$> ")) ) break;
+			tptr = ptr;
+			while ( isspace(*tptr) )
+				++tptr;
+			if ( *tptr )
+			{
+				add_history(ptr);
+#if defined(READLINE_HISTORY_FILENAME) && READLINE_HISTORY_LINES
+				add_to_history_file(ptr);
+#endif
+			}
+			strncpy(str,ptr,STRSIZE);
+			free(ptr);
+			ptr = NULL;
+#endif	/* USE_READLINE */
 #endif
         }
         ptr = str;
