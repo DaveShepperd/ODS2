@@ -35,12 +35,12 @@ int tab(char *in_filename,char *out_filename,int in_size,int out_size,
     }
     if (out_size < 1) out_size = in_size;
     if ((in_file = fopen(in_filename,"r")) == NULL) {
-	printf("Cannot open input file %s\n",in_filename);
-	perror("Input error: ");
+		perror("Input error: ");
+		printf("Cannot open input file %s\n",in_filename);
     } else {
 	if ((out_file = fopen(out_filename,"w")) == NULL) {
+		perror("Output error: ");
 	    printf("Cannot open output file %s\n",out_filename);
-	    perror("Output error: ");
 	} else {
 	    int ch,quote_ch = 0;
 	    int tab_pos = 0,last_pos = 0;
@@ -65,21 +65,21 @@ int tab(char *in_filename,char *out_filename,int in_size,int out_size,
 		}
 		if (quote_ch || (ch != ' ' && ch != '\t')) {
 		    while (last_pos < tab_pos) {
-			int tab_skip = (last_pos / out_size + 1) * out_size;
-			if (tab_skip - last_pos <= 1 || tab_skip > tab_pos) {
-			    err = fputc(' ',out_file);
-			    out_count++;
-			    last_pos++;
-			} else {
-			    err = fputc('\t',out_file);
-			    out_count++;
-			    last_pos = (last_pos / out_size + 1) * out_size;
-			}
-			if (err == EOF) {
-			    printf("I/O error writing %s\n",out_filename);
-			    perror("Output error: ");
-			    exit(EXIT_FAILURE);
-			}
+				int tab_skip = (last_pos / out_size + 1) * out_size;
+				if (tab_skip - last_pos <= 1 || tab_skip > tab_pos) {
+					err = fputc(' ',out_file);
+					out_count++;
+					last_pos++;
+				} else {
+					err = fputc('\t',out_file);
+					out_count++;
+					last_pos = (last_pos / out_size + 1) * out_size;
+				}
+				if (err == EOF) {
+					perror("Output error: ");
+					printf("I/O error writing %s\n",out_filename);
+					exit(EXIT_FAILURE);
+				}
 		    }
 		    err = fputc(ch,out_file);
 		    out_count++;
