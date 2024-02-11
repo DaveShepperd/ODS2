@@ -23,6 +23,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <memory.h>
 #include <ctype.h>
 
@@ -416,9 +417,10 @@ unsigned sys_search(struct FAB *fab)
 
 
 #define DEFAULT_SIZE 120
-char default_buffer[DEFAULT_SIZE];
-char *default_name = "DKA200:[000000].;";
-int default_size[] = {7,8,0,1,1};
+static char default_buffer[DEFAULT_SIZE];
+static char DefaultName[] = "DKA200:[000000].;";
+static char *default_name = DefaultName;
+static int default_size[] = {7,8,0,1,1};
 
 
 /* Function to perform RMS parse.... */
@@ -429,6 +431,7 @@ unsigned do_parse(struct FAB *fab,struct WCCFILE **wccret)
     char *fna = fab->fab$l_fna;
     char *dna = fab->fab$l_dna;
     struct NAM *nam = fab->fab$l_nam;
+    char topDir[] = "[000000]";
     int sts;
     int fna_size[5] = {0, 0, 0, 0, 0},dna_size[5] = {0, 0, 0, 0, 0};
     if (fab->fab$w_ifi != 0) return RMS$_IFI;
@@ -461,7 +464,7 @@ memset(wccfile,0,sizeof(struct WCCFILE)+256);
 
     {
         int field,ess = MAX_FILELEN;
-        char *esa,*def = default_name;
+        char *esa, *def = default_name;
         esa = wccfile->wcf_result;
         for (field = 0; field < 5; field++) {
             char *src;
@@ -496,13 +499,13 @@ memset(wccfile,0,sizeof(struct WCCFILE)+256);
                             len--;
                             src++;
                             if (count < 2 || (count == 7 &&
-                                              memcmp(dir,"[000000",7) == 0)) return RMS$_DIR;
+                                              memcmp(dir,topDir,7) == 0)) return RMS$_DIR;
                             while (count > 1) {
                                 if (dir[--count] == '.') break;
                             }
                         }
                         if (count < 2 && len < 2) {
-                            src = "[000000]";
+                            src = topDir;
                             dirlen = len = 8;
                         } else {
                             if (*src != '.' && *src != ']') return RMS$_DIR;
@@ -724,80 +727,323 @@ struct WCCFILE *ifi_table[] = {
 
 /* get for sequential files */
 
+static void getFileName(struct FAB *fab, char *dest, int destLen)
+{
+    if ( dest && destLen )
+    {
+        struct NAM *nam;
+        int dLen=0;
+        if ( fab && (nam=fab->fab$l_nam) )
+        {
+            dLen += nam->nam$b_dev;
+            dLen += nam->nam$b_dir;
+            dLen += nam->nam$b_name;
+            dLen += nam->nam$b_ver;
+            if ( dLen > destLen-1 )
+                dLen = destLen-1;
+            memcpy(dest, nam->nam$l_dev, dLen);
+        }
+        dest[dLen-1] = 0;
+    }
+}
+
+typedef struct
+{
+    uint64_t nextByte;      // Basically the total bytes read from file so far
+    uint64_t eofByte;       // Index into file of the last byte
+    struct FAB *fab;        // Pointer to FAB
+    struct RAB *rab;        // Pointer to RAB
+    struct FCB *fcb;        // Pointer to FCB
+    struct VIOC *vioc;      // Pointer to VIOC
+    char *fBuff;            // Pointer to chunk of file's data
+    unsigned int stBlock;   // Starting block of chunk
+    unsigned int blocks;    // Number of blocks in fBuff
+    unsigned int segLen;    // Number of bytes available in fBuff
+    unsigned int fbIndex;   // Index into fBuff to get the next read data
+    int recordCounter;      // Number of records found
+} FileData_t;
+
+static int getFileData(const char *title, FileData_t *filePtr, int fresh)
+{
+    int sts;
+    
+    if ( filePtr->vioc )
+        deaccesschunk(filePtr->vioc, 0, 0, 1);
+    filePtr->vioc = NULL;
+    sts = accesschunk(filePtr->fcb, filePtr->stBlock, &filePtr->vioc, &filePtr->fBuff, &filePtr->blocks, 0);
+#if DEBUG
+    printf("sys_get(): %s - Asked accesschunk() for block 0x%X to get record's byte count. Returned a total of %d blocks. sts=%d. fbIndex=0x%X, eofByte=0x%lX, nextByte=0x%lX\n",
+           title?title:"", filePtr->stBlock,filePtr->blocks,sts,filePtr->fbIndex,filePtr->eofByte,filePtr->nextByte);
+#endif
+    if ((sts & 1) == 0) {
+        if ( sts == SS$_ENDOFFILE )
+        {
+            printf("getFileData(): %s - Unexpected EOF detected. block=0x%X, fbIndex=0x%X, eofByte=0x%lX, nextByte=0x%lX\n",
+                   title?title:"", filePtr->stBlock,filePtr->fbIndex,filePtr->eofByte,filePtr->nextByte);
+            sts = RMS$_EOF;
+        }
+        return sts;
+    }
+    filePtr->segLen = filePtr->blocks*512;
+    if ( fresh )
+        filePtr->fbIndex = 0;
+    return 1;
+}
+
 unsigned sys_get(struct RAB *rab)
 {
-    char *buffer,*recbuff;
-    unsigned block,blocks,offset;
+    FileData_t fileData;
+    struct FAB *fab;        // Pointer to FAB
+    char *recbuff;
+    int sts, readRaw;
     unsigned cpylen,reclen;
-    unsigned delim,rfm,sts;
-    struct VIOC *vioc;
-    struct FCB *fcb = ifi_table[rab->rab$l_fab->fab$w_ifi]->wcf_fcb;
+    unsigned delim,rfm;
+
+    fileData.rab = rab;
+    fileData.fab = fab = rab->rab$l_fab;
+    fileData.fcb = ifi_table[fab->fab$w_ifi]->wcf_fcb;
+    fileData.vioc = NULL;
 
     reclen = rab->rab$w_usz;
     recbuff = rab->rab$l_ubf;
     delim = 0;
-    switch (rfm = rab->rab$l_fab->fab$b_rfm) {
-        case FAB$C_STMLF:
-            delim = 1;
-	    break;
-        case FAB$C_STMCR:
-            delim = 2;
-	    break;
-        case FAB$C_STM:
-            delim = 3;
-	    break;
-        case FAB$C_VFC:
-            reclen += rab->rab$l_fab->fab$b_fsz;
-            break;
-        case FAB$C_FIX:
-            if (reclen < rab->rab$l_fab->fab$w_mrs) return RMS$_RTB;
-            reclen = rab->rab$l_fab->fab$w_mrs;
-            break;
+    readRaw = 0;
+    /* If we got a record error and want to switch to read raw */
+    if ( (rab->rab$w_flg & (RAB$M_FAL|RAB$M_RCE)) == (RAB$M_FAL|RAB$M_RCE) )
+        readRaw = 1;  /* read raw */
+    if (!readRaw) {
+        switch (rfm = fab->fab$b_rfm) {
+            case FAB$C_STMLF:
+                if ( (rab->rab$w_flg & RAB$M_SPC) )
+                    readRaw = 1;
+                else
+                    delim = 1;
+                break;
+            case FAB$C_STMCR:
+                if ( (rab->rab$w_flg & RAB$M_SPC) )
+                    readRaw = 1;
+                else
+                    delim = 2;
+                break;
+            case FAB$C_STM:
+                if ( (rab->rab$w_flg & RAB$M_SPC) )
+                    readRaw = 1;
+                else
+                    delim = 3;
+                break;
+            case FAB$C_VFC:
+                reclen += fab->fab$b_fsz;
+                break;
+            case FAB$C_FIX:
+                if (reclen < fab->fab$w_mrs)
+                    return RMS$_RTB;
+                reclen = fab->fab$w_mrs;
+                break;
+        }
     }
 
-    offset = rab->rab$w_rfa[2] % 512;
-    block = (rab->rab$w_rfa[1] << 16) + rab->rab$w_rfa[0];
-    if (block == 0) block = 1;
-
+    /* This seems suboptimal since we probably had a chunk with 2k (4x512) in it but this might shift the entire buffer and cause another read? */
+    fileData.stBlock = ((rab->rab$w_rfa[1] << 16) + rab->rab$w_rfa[0]);
+    fileData.stBlock += rab->rab$w_rfa[2]/512; 
+    fileData.fbIndex = rab->rab$w_rfa[2]%512;
+    if (fileData.stBlock == 0)
+        fileData.stBlock = 1;
+    fileData.nextByte = fileData.stBlock;
+    fileData.nextByte *= 512;
+    fileData.nextByte += fileData.fbIndex;
+    fileData.eofByte = VMSSWAP(fileData.fcb->head->fh2$w_recattr.fat$l_efblk);
+    fileData.eofByte *= 512;
+    fileData.eofByte += VMSWORD(fileData.fcb->head->fh2$w_recattr.fat$w_ffbyte);
+    rab->rab$w_rsz = 0;
+    if ( fileData.nextByte >= fileData.eofByte )
+        return RMS$_EOF;
+    fileData.segLen = 0;
+    fileData.recordCounter = 0;
+    
+    if ( !readRaw && (rfm == FAB$C_VAR || rfm == FAB$C_VFC) )
     {
-        unsigned eofblk = VMSSWAP(fcb->head->fh2$w_recattr.fat$l_efblk);
-        if (block > eofblk || (block == eofblk &&
-            offset >= VMSWORD(fcb->head->fh2$w_recattr.fat$w_ffbyte))) return RMS$_EOF;
-    }
-
-    sts = accesschunk(fcb,block,&vioc,&buffer,&blocks,0);
-    if ((sts & 1) == 0) {
-        if (sts == SS$_ENDOFFILE) sts = RMS$_EOF;
-        return sts;
-    }
-
-    if (rfm == FAB$C_VAR || rfm == FAB$C_VFC) {
-        vmsword *lenptr = (vmsword *) (buffer + offset);
-        reclen = VMSWORD(*lenptr);
-        offset += 2;
-        if (reclen > rab->rab$w_usz) {
-            sts = deaccesschunk(vioc,0,0,0);
+        vmsword *lenptr;
+        sts = getFileData("Entry",&fileData,0);
+        if ( !(sts&1) )
+            return sts;
+        if ( fileData.segLen-fileData.fbIndex < 2 )
+        {
+            printf("sys_get(): Bad internal record structure. segLen=0x%X, fbIndex=0x%X, diff=0x%X. Expected it to be >= 2 to hold record's byte count.\n",
+                   fileData.segLen
+                   ,fileData.fbIndex
+                   ,fileData.segLen-fileData.fbIndex
+                   );
+            if ( fileData.vioc )
+                deaccesschunk(fileData.vioc, 0, 0, 1);
             return RMS$_RTB;
-        } 
+        }
+        lenptr = (vmsword *)(fileData.fBuff + fileData.fbIndex);
+        reclen = VMSWORD(*lenptr);
+//        if ( reclen > 100 )
+//        {
+//            printf("sys_get(): Found a reclen of 0x%X > 0x%X\n", reclen, 100 );
+//        }
+        if ( reclen > rab->rab$w_usz || (fab->fab$w_mrs && reclen > fab->fab$w_mrs) )
+        {
+            char name[NAM$C_MAXRSS + 1];
+            getFileName(fab,name,sizeof(name));
+            if ( !(rab->rab$w_flg & RAB$M_FAL) )
+            {
+                if ( fileData.vioc )
+                    deaccesschunk(fileData.vioc, 0, 0, 0);
+                printf("%%sys_get()-E-BADCNT: Failed to fetch valid record count. blocks=0x%X, seglen=0x%X, fbIndex=0x%X, reclen=0x%X, usz=0x%X, mrs=0x%X\n",
+                        fileData.blocks
+                       ,fileData.segLen
+                       ,fileData.fbIndex
+                       ,reclen
+                       ,rab->rab$w_usz
+                       ,fab->fab$w_mrs
+                       );
+                printf("-sys_get()-I-FILE: From file '%s'\n", name);
+                return RMS$_RTB;
+            }
+            if ( !(rab->rab$w_flg & RAB$M_RCE) )
+            {
+                printf("%%sys_get()-E-BADCNT: Failed to fetch valid record count. blocks=0x%X, segLen=0x%X, fbIndex=0x%X, reclen=0x%X, usz=0x%X, tot=%u. Switching to raw read.\n",
+                        fileData.blocks
+                       ,fileData.segLen
+                       ,fileData.fbIndex
+                       ,reclen
+                       ,rab->rab$w_usz
+                       ,rab->rab$l_tot
+                       );
+                printf("-sys_get()-I-FILE: From file '%s'\n", name);
+            }
+            rab->rab$w_flg |= RAB$M_RCE;
+            readRaw = 1;
+            delim = 0;
+        }
+        else
+        {
+            /* VAR or VFC record and reclen is something reasonable */
+            int fsz = fab->fab$b_fsz;
+            ++fileData.recordCounter;
+            fileData.fbIndex += 2;        /* account for record size bytes */
+            fileData.nextByte += 2;         /* advance file byte count too */
+            if ( rfm == FAB$C_VFC ) {
+                char msg[132];
+                msg[0] = 0;
+                sts = 1;
+                do {
+                    if ( fsz != 2 )
+                    {
+                        snprintf(msg,sizeof(msg),"sys_get(): WARNING: File has VFC field size of %d. Only support for a size of 2. VFC bytes will be included in output records.\n", fsz);
+                        break;
+                    }
+                    if ( fileData.segLen-fileData.fbIndex < 2 )
+                    {
+                        /* oops. Ran out of buffer after getting record size bytes. Get next block */
+                        if ( fileData.segLen-fileData.fbIndex > 0 )
+                        {
+                            snprintf(msg,sizeof(msg),"sys_get()-E-VFC, Internal error getting VFC bytes. Ran out of buffer but index of %d is not the expected 0\n", fileData.segLen-fileData.fbIndex);
+                            break;
+                        }
+                        fileData.stBlock += fileData.fbIndex/512;
+                        sts = getFileData("VFC bytes",&fileData,1);
+                        if ( !(sts&1))
+                        {
+                            if ( sts == SS$_ENDOFFILE )
+                            {
+                                printf("sys_get(): Something bad happened. Got EOF trying to get VFC bytes.\n");
+                                sts = RMS$_EOF;
+                            }
+                            return sts;
+                        }
+                    }
+//                    if ( (fileData.fBuff[fileData.fbIndex] & 0xFF) != 0x1 || (fileData.fBuff[fileData.fbIndex + 1] & 0xFF) != 0x8D )
+//                    {
+//                        printf("Found unusual VFC bytes of 0x%02X and 0x%02X\n", fileData.fBuff[fileData.fbIndex]&0xFF, fileData.fBuff[fileData.fbIndex+1]&0xFF);
+//                    }
+                    if ( rab->rab$l_rhb )
+                        memcpy(rab->rab$l_rhb,fileData.fBuff+fileData.fbIndex,fsz);
+                    fileData.fbIndex += fsz;  /* account for VFC bytes */
+                    fileData.nextByte += fsz;
+                    reclen -= fsz;  /* remove the VFC bytes from record length */
+                } while (0);
+                if ( msg[0] )
+                    printf(msg);
+                if ( !(sts&1) )
+                    return sts;
+            }
+        }
     }
 
+    if ( readRaw )
+        reclen = rab->rab$w_usz&-4;
     cpylen = 0;
     while (1) {
         int dellen = 0;
-        int seglen = blocks * 512 - offset;
-	if (delim) {
-	    if (delim >= 3) {
-                char *ptr = buffer + offset;
+        int maxCpyLen;
+        if ( fileData.nextByte >= fileData.eofByte )
+        {
+            /* ran off end of file. */
+            if ( fileData.vioc )
+                deaccesschunk(fileData.vioc, 0, 0, 1);
+            rab->rab$w_rsz = cpylen;
+            rab->rab$w_rfa[0] = fileData.stBlock & 0xffff;
+            rab->rab$w_rfa[1] = fileData.stBlock >> 16;
+            rab->rab$w_rfa[2] = fileData.fbIndex;
+            sts = (cpylen || fileData.recordCounter) ? 1 : RMS$_EOF;
+            return sts;
+            
+        }
+#if 0
+        if ( fileData.nextByte >= 0xB000 && fileData.nextByte < 0xB800 )
+        {
+            printf("Place to put breakpoint. fileData.nextByte=0x%lX, stBlock=0x%X, blocks=0x%X, segLen=0x%X, fbIndex=0x%X. vioc=%p\n",
+                   fileData.nextByte, fileData.stBlock, fileData.blocks, fileData.segLen, fileData.fbIndex, (void *)fileData.vioc );
+        }
+#endif
+        if ( !fileData.vioc || fileData.segLen - fileData.fbIndex <= 0 )
+        {
+            /* ran out of buffer or it's the first fetch */
+            fileData.stBlock += fileData.fbIndex/512;
+            sts = getFileData("Rcd-continue",&fileData,fileData.vioc ? 1:0);
+            if ((sts & 1) == 0) {
+                if (sts == SS$_ENDOFFILE) {
+                     rab->rab$w_rsz = cpylen;
+                     rab->rab$w_rfa[0] = fileData.stBlock & 0xffff;
+                     rab->rab$w_rfa[1] = fileData.stBlock >> 16;
+                     rab->rab$w_rfa[2] = fileData.fbIndex;
+                     sts = (cpylen || fab->fab$b_rfm == FAB$C_VFC) ? 1:RMS$_EOF;
+                }
+                return sts;
+            }
+#if 0
+            if ( fileData.nextByte == 0xB580 || fileData.nextByte == 0xB600 )
+            {
+                unsigned char *ptr = (unsigned char *)fileData.fBuff+fileData.fbIndex;
+                printf("fileData.nextByte=0x%lX, stBlock=0x%X, blocks=0x%X, segLen=0x%X, fbIndex=0x%X, tot=0x%X\n",
+                       fileData.nextByte, fileData.stBlock, fileData.blocks, fileData.segLen, fileData.fbIndex, rab->rab$l_tot );
+                printf("buff: %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                       ptr[0],ptr[1],ptr[2],ptr[3],ptr[4],ptr[5],ptr[6],ptr[7] );
+            }
+#endif
+        }
+        maxCpyLen = fileData.segLen-fileData.fbIndex;
+        if ( maxCpyLen > reclen )
+            maxCpyLen = reclen;
+        if ( delim )
+        {
+            /* delim: 1=strmlf, 2=strmcr, 3=stream*/
+    	    if (delim >= 3) {
+                /* stream_crlf */
+                char *ptr = fileData.fBuff + fileData.fbIndex;
                 if (dellen == 1 && *ptr != '\n') {
                     if (cpylen >= reclen) {
-                        seglen = 0;
+                        maxCpyLen = 0;
                         sts = RMS$_RTB;
                     } else {
                         *recbuff++ = '\r';
                         cpylen++;
                     }
                 }
-                while (seglen-- > 0) {
+                while (maxCpyLen-- > 0) {
                     char ch = *ptr++;
                     if (ch == '\n' || ch == '\f' || ch == '\v') {
                         if (ch == '\n') {
@@ -811,63 +1057,56 @@ unsigned sys_get(struct RAB *rab)
                     dellen = 0;
                     if (ch == '\r') dellen = 1;
                 }
-                seglen = ptr - (buffer + offset) - dellen;;
-	    } else {
-                char *ptr = buffer + offset;
-                char term = '\r';
-                if (delim == 1) term = '\n';
-                while (seglen-- > 0) {
+                maxCpyLen = ptr - (fileData.fBuff + fileData.fbIndex) - dellen;
+    	    } else {
+                /* Look for either a \n or a \r */
+                char *ptr = fileData.fBuff + fileData.fbIndex;
+                char term = '\r';               /* Assume cr */
+                if (delim == 1) term = '\n';    /* Nope, lf */
+                while (maxCpyLen-- > 0) {
                     if (*ptr++ == term) {
-                        dellen = 1;
+                        dellen = 1;             /* found it */
                         delim = 99;
                         break;
                     }
                 }
-                seglen = ptr - (buffer + offset) - dellen;;
+                maxCpyLen = ptr - (fileData.fBuff + fileData.fbIndex) - dellen;
             }
-        } else {
-            if (seglen > reclen - cpylen) seglen = reclen - cpylen;
-            if (rfm == FAB$C_VFC && cpylen < rab->rab$l_fab->fab$b_fsz) {
-                unsigned fsz = rab->rab$l_fab->fab$b_fsz - cpylen;
-                if (fsz > seglen) fsz = seglen;
-                if (rab->rab$l_rhb) memcpy(rab->rab$l_rhb + cpylen,buffer + offset,fsz);
-                cpylen += fsz;
-                offset += fsz;
-                seglen -= fsz;
-            }
+        } else if (!readRaw) {
+            if (maxCpyLen > reclen - cpylen)
+                maxCpyLen = reclen - cpylen;
         }
-        if (seglen) {
-            if (cpylen + seglen > reclen) {
-                seglen = reclen - cpylen;
-                sts = RMS$_RTB;
-            }
-	    memcpy(recbuff,buffer + offset,seglen);
-            recbuff += seglen;
-            cpylen += seglen;
+        else
+        {
+            if (maxCpyLen > reclen - cpylen)
+                maxCpyLen = reclen - cpylen;
         }
-        offset += seglen + dellen;
-        if ((offset & 1) && (rfm == FAB$C_VAR || rfm == FAB$C_VFC)) offset++;
-        deaccesschunk(vioc,0,0,1);
-        if ((sts & 1) == 0) return sts;
-        block += offset / 512;
-        offset %= 512;
-        if ((delim == 0 && cpylen >= reclen) || delim == 99) {
-	    break;
-	} else {
-            sts = accesschunk(fcb,block,&vioc,&buffer,&blocks,0);
-            if ((sts & 1) == 0) {
-                if (sts == SS$_ENDOFFILE) sts = RMS$_EOF;
-                return sts;
-            }
-            offset = 0;
+        if ( maxCpyLen > (int)(fileData.eofByte - fileData.nextByte) )
+            maxCpyLen = fileData.eofByte-fileData.nextByte;
+        if ( maxCpyLen )
+        {
+    	    memcpy(recbuff, fileData.fBuff + fileData.fbIndex, maxCpyLen);
+            recbuff += maxCpyLen;
+            cpylen += maxCpyLen;
+            if ( !(rab->rab$w_flg & RAB$M_RCE) )
+                rab->rab$l_tot += maxCpyLen;
         }
+        fileData.fbIndex += maxCpyLen + dellen;
+        fileData.nextByte += maxCpyLen + dellen;
+        if ( !readRaw && ((fileData.fbIndex & 1) && (rfm == FAB$C_VAR || rfm == FAB$C_VFC)) )
+        {
+            ++fileData.fbIndex;
+            ++fileData.nextByte;
+        }
+        if ( fileData.nextByte >= fileData.eofByte || (delim == 0 && cpylen >= reclen) || delim == 99)
+    	    break;
     }
-    if (rfm == FAB$C_VFC) cpylen -= rab->rab$l_fab->fab$b_fsz;
+    if ( fileData.vioc )
+        deaccesschunk(fileData.vioc, 0, 0, 1);
     rab->rab$w_rsz = cpylen;
-
-    rab->rab$w_rfa[0] = block & 0xffff;
-    rab->rab$w_rfa[1] = block >> 16;
-    rab->rab$w_rfa[2] = offset;
+    rab->rab$w_rfa[0] = fileData.stBlock & 0xffff;
+    rab->rab$w_rfa[1] = fileData.stBlock >> 16;
+    rab->rab$w_rfa[2] = fileData.fbIndex;
     return sts;
 }
 
@@ -1184,7 +1423,7 @@ unsigned sys_create(struct FAB *fab)
 {
     unsigned sts;
     int ifi_no = 1;
-    int wcc_flag = 0;
+//    int wcc_flag = 0;
     struct WCCFILE *wccfile = NULL;
     struct NAM *nam = fab->fab$l_nam;
     if (fab->fab$w_ifi != 0) return RMS$_IFI;
@@ -1195,8 +1434,8 @@ unsigned sys_create(struct FAB *fab)
     }
     if (wccfile == NULL) {
         sts = do_parse(fab,&wccfile);
-        if (sts & 1) {
-            wcc_flag = 1;
+        if ( (sts & 1) ) {
+//            wcc_flag = 1;
             if (wccfile->wcf_status & STATUS_WILDCARD) {
                 sts = RMS$_WLD;
             } else {
@@ -1207,13 +1446,13 @@ unsigned sys_create(struct FAB *fab)
     } else {
         sts = 1;
     }
-    if (sts & 1) {
+    if ( (sts & 1) ) {
         struct fibdef fibblk;
-        struct dsc_descriptor fibdsc,serdsc;
+        struct dsc_descriptor fibdsc; //,serdsc;
         fibdsc.dsc_w_length = sizeof(struct fibdef);
         fibdsc.dsc_a_pointer = (char *) &fibblk;
-        serdsc.dsc_w_length = wccfile->wcf_wcd.wcd_reslen;
-        serdsc.dsc_a_pointer = wccfile->wcf_result + wccfile->wcf_wcd.wcd_prelen;
+//        serdsc.dsc_w_length = wccfile->wcf_wcd.wcd_reslen;
+//        serdsc.dsc_a_pointer = wccfile->wcf_result + wccfile->wcf_wcd.wcd_prelen;
         memcpy(&fibblk.fib$w_did_num,&wccfile->wcf_wcd.wcd_dirid,sizeof(struct fiddef));
         fibblk.fib$w_nmctl = 0;
         fibblk.fib$l_acctl = 0;
@@ -1224,13 +1463,13 @@ unsigned sys_create(struct FAB *fab)
         fibblk.fib$l_wcc = 0;
         sts = update_create(wccfile->wcf_vcb,(struct fiddef *)&fibblk.fib$w_did_num,
 		"TEST.FILE;1",(struct fiddef *)&fibblk.fib$w_fid_num,&wccfile->wcf_fcb);
-        if (sts & 1)
-            sts = direct(wccfile->wcf_vcb,&fibdsc,
-		&wccfile->wcf_wcd.wcd_serdsc,NULL,NULL,2);
-            if (sts & 1) {
+        if ( (sts & 1) ) {
+            sts = direct(wccfile->wcf_vcb,&fibdsc, &wccfile->wcf_wcd.wcd_serdsc,NULL,NULL,2);
+            if ( (sts & 1) ) {
                 sts = update_extend(wccfile->wcf_fcb,100,0);
                 ifi_table[ifi_no] = wccfile;
                 fab->fab$w_ifi = ifi_no;
+            }
 	    }
     }
     cleanup_wcf(wccfile);
@@ -1247,3 +1486,45 @@ unsigned sys_extend(struct FAB *fab)
                         fab->fab$l_alq - ifi_table[ifi_no]->wcf_fcb->hiblock,0);
     return sts;
 }
+
+typedef struct
+{
+    int errSts;
+    const char *errMsg;
+} RmsErrors_t;
+
+static const RmsErrors_t RmsErrors[] =
+{
+    { RMS$_RTB, "Record too large for user's buffer"  },
+    { RMS$_EOF, "End of file"  },
+    { RMS$_FNF, "File not found"  },
+    { RMS$_NMF, "No matching file"  },
+    { RMS$_WCC, "Invalid wildcard context"  },
+    { RMS$_BUG, "Internal bug?"  },
+    { RMS$_DIR, "Bad directory syntax"  },
+    { RMS$_ESS, "Bad extension syntax"  },
+    { RMS$_FNM, "Bad filename syntax"  },
+    { RMS$_IFI, "Bad file index?"  },
+    { RMS$_NAM, "No filename provided"  },
+    { RMS$_RSS, "Filename size problem"  },
+    { RMS$_RSZ, "Bad output record size"  },
+    { RMS$_WLD, "Failed to find file via wildcard?"  },
+    { RMS$_DNF, "Directory not found"  },
+    { 0, NULL }
+};
+
+void sys_error_str(int rmsSts, char *dest, int destLen)
+{
+    const RmsErrors_t *ptr = RmsErrors;
+    while ( ptr->errMsg )
+    {
+        if ( ptr->errSts == rmsSts )
+        {
+            strncpy(dest, ptr->errMsg, destLen);
+            return;
+        }
+        ++ptr;
+    }
+    snprintf(dest,destLen,"Undefined error %d", rmsSts);
+}
+
