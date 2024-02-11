@@ -53,8 +53,6 @@
 #include "ssdef.h"
 #include "cache.h"
 
-
-#define DEBUG                   /* Debug mode? */
 #define IMBALANCE 5             /* Tree imbalance limit */
 #define CACHELIM  256           /* Free object limit */
 #define CACHEGOAL 128           /* Free object goal */
@@ -166,7 +164,7 @@ struct CACHE *cache_delete(struct CACHE *cacheobj)
     cacheobj->refcount = 0;
 #endif
     free(cacheobj);
-    return cacheobj;
+    return NULL; //cacheobj;
 }
 
 
@@ -304,6 +302,9 @@ void *cache_find(void **root,unsigned hashval,void *keyval,unsigned *retsts,
         if (cmp == 0 && compare_func != NULL) cmp = (*compare_func) (hashval,keyval,cacheobj);
         if (cmp == 0) {
             cache_touch(cacheobj);
+#if DEBUG
+			printf("cache_find(): Found existing cache entry with hash 0x%X at %p. Refcount now=%d\n", hashval, (void *)cacheobj, cacheobj->refcount);
+#endif			
             if (retsts != NULL) *retsts = SS$_NORMAL;
             return cacheobj;
         }
@@ -342,6 +343,9 @@ void *cache_find(void **root,unsigned hashval,void *keyval,unsigned *retsts,
         }
     }
     if (create_func == NULL) {
+#if DEBUG
+		printf("cache_find(): Failed to find cache entry with hash 0x%X. Returned ITEM_NOT_FOUND status\n", hashval);
+#endif			
         if (retsts != NULL) *retsts = SS$_ITEMNOTFOUND;
     } else {
         cacheobj = (*create_func) (hashval,keyval,retsts);
@@ -358,6 +362,9 @@ void *cache_find(void **root,unsigned hashval,void *keyval,unsigned *retsts,
             cachecreated++;
             if (cachecount++ >= cachepeak) cachepeak = cachecount;
         }
+#if DEBUG
+		printf("cache_find(): Failed to find cache entry with hash 0x%X. Created a new entry at %p\n", hashval, (void *)cacheobj);
+#endif			
     }
     return cacheobj;
 }
