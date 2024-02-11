@@ -176,7 +176,9 @@ struct SCB {
 #pragma member_alignment restore
 #endif
 
+#ifndef EXTMAX
 #define EXTMAX 20
+#endif
 
 struct WCB {
     struct CACHE cache;
@@ -272,7 +274,7 @@ unsigned accesschunk(struct FCB *fcb,unsigned vbn,struct VIOC **retvioc,
                      char **retbuff,unsigned *retblocks,unsigned wrtblks);
 unsigned access_extend(struct FCB *fcb,unsigned blocks,unsigned contig);
 unsigned update_freecount(struct VCBDEV *vcbdev,unsigned *retcount);
-unsigned update_create(struct VCB *vcb,struct fiddef *did,char *filename,
+unsigned update_create(struct VCB *vcb,struct fiddef *did,const char *filename,
                        struct fiddef *fid,struct FCB **fcb);
 unsigned update_extend(struct FCB *fcb,unsigned blocks,unsigned contig);
 unsigned short checksum(vmsword *block);
