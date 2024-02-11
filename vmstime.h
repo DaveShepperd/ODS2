@@ -18,6 +18,10 @@
 #ifndef __VMSTIME__
 #define __VMSTIME__ loaded
 
+#if USE_UTIME
+#include <utime.h>
+#endif
+
 #include "descrip.h"
 
 #ifdef __ALPHA
@@ -171,4 +175,5 @@ unsigned lib_sub_times(VMSTIME time1,VMSTIME time2,VMSTIME result);
 unsigned vmstime_from_nt(VMSTIME nt_time,VMSTIME vms_time);
 unsigned vmstime_to_nt(VMSTIME vms_time,VMSTIME nt_time);
 int vmstime_compare(VMSTIME time1,VMSTIME time2);
+time_t vmstime_to_unix(VMSTIME vms_time);
 #endif

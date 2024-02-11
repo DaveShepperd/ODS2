@@ -70,7 +70,7 @@
 #include <windows.h>            /* Use windows routines to get currrent time */
 #else
 
-#ifndef NO_LOCALTIME
+#if !defined(NO_LOCALTIME) && !USE_GETTIME
 #if defined(VMS) && defined(__GNUC__)
 #include <timeb.h>              /* For GCC include libraries on VMS (sigh!) */
 #else
@@ -120,6 +120,10 @@
 #define SMALL_INT unsigned char
 #endif
 
+#endif
+
+#if USE_STRERROR
+#define perror(x) printf("%s: %s\n", x, strerror(errno));
 #endif
 
 unsigned lib_addx(void *addant,void *addee,void *result,int *lenadd)
@@ -329,20 +333,30 @@ unsigned sys_gettim(VMSTIME timadr)
     return vmstime_date_time(40587 + curtim / 86400,timadr,
                              (curtim % 86400) * 100);
 #else
-    /* Get time from ftime() and localtime() */
+    /* Get time from ftime() or clock_gettime() and localtime() */
+	unsigned short timvec[7];
+	struct tm *lclptr;
+#if !USE_GETTIME
     struct timeb timval;
-    struct tm *lclptr;
-    unsigned short timvec[7];
     timval.millitm = 0;         /* for broken versions of ftime() */
     ftime(&timval);
     lclptr = localtime(&timval.time);
+#else
+	struct timespec timspec;
+	clock_gettime(CLOCK_REALTIME,&timspec);
+	lclptr = localtime(&timspec.tv_sec);
+#endif
     timvec[0] = lclptr->tm_year + 1900;
     timvec[1] = lclptr->tm_mon + 1;
     timvec[2] = lclptr->tm_mday;
     timvec[3] = lclptr->tm_hour;
     timvec[4] = lclptr->tm_min;
     timvec[5] = lclptr->tm_sec;
+#if !USE_GETTIME
     timvec[6] = timval.millitm / 10;
+#else
+	timvec[6] = timspec.tv_nsec/1000000;
+#endif
     return lib_cvt_vectim(timvec,timadr);
 #endif
 #endif
@@ -1085,3 +1099,34 @@ unsigned vmstime_to_nt(VMSTIME vms_time,VMSTIME nt_time)
     if (ISDELTA(vms_time)) return LIB__IVTIME;
     return lib_add_times(vms_time,(pVMSTIME) vmstime_nt_offset,nt_time);
 }
+
+#if USE_UTIME
+/**
+ * Convert the 64 bit VMS time to the time_t unix time.
+ *
+ * @param text Pointer to 8 byte VMS timestamp in VAX format.
+ *
+ * @return
+ *      0 if no time specified.
+ *      non-zero unix time in seconds since 1-jan-1970:00:00:00 GMT.
+ */
+time_t vmstime_to_unix( VMSTIME text )
+{
+	unsigned short timevec[7];
+	struct tm lcltm;
+	time_t ans;
+	
+	if ( !(sys_numtim(timevec,text)&1) )
+		return 0;
+	memset(&lcltm,0,sizeof(lcltm));
+	lcltm.tm_year = timevec[0]-1900;
+	lcltm.tm_mon = timevec[1]-1;
+	lcltm.tm_mday = timevec[2];
+	lcltm.tm_hour = timevec[3];
+	lcltm.tm_min = timevec[4];
+	lcltm.tm_sec = timevec[5];
+	if ( (ans=mktime(&lcltm)) < 0 )
+		return 0;
+	return ans;
+}
+#endif
