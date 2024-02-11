@@ -266,11 +266,13 @@ unsigned update_findhead(struct VCBDEV *vcbdev,unsigned *rethead_no,
                             VMSWORD(vcbdev->home.hm2$w_ibmapvbn) +
                             VMSWORD(vcbdev->home.hm2$w_ibmapsize);
                         sts = accesschunk(vcbdev->idxfcb,idxblk,retvioc,(char **) headbuff,NULL,1);
-                        if (sts & 1) {
+                        if ( (sts & 1) ) {
                             *work_ptr |= 1 << bit_no;
                             modify_flag = 1;
-                            if ((*headbuff)->fh2$w_checksum != 0 || (*headbuff)->fh2$w_fid.fid$w_num != 0 ||
-                                VMSLONG((*headbuff)->fh2$l_filechar) & FH2$M_MARKDEL == 0) {
+                            if (   (*headbuff)->fh2$w_checksum != 0
+                                || (*headbuff)->fh2$w_fid.fid$w_num != 0
+                                || (VMSLONG((*headbuff)->fh2$l_filechar) & FH2$M_MARKDEL) == 0
+                               ) {
                                 sts = deaccesschunk(*retvioc,0,0,0);
                             } else {
                                 *rethead_no = head_no + 1;
@@ -291,7 +293,7 @@ unsigned update_findhead(struct VCBDEV *vcbdev,unsigned *rethead_no,
     return sts;
 }
 
-unsigned update_addhead(struct VCB *vcb,char *filename,struct fiddef *back,
+unsigned update_addhead(struct VCB *vcb,const char *filename,struct fiddef *back,
                      unsigned seg_num,struct fiddef *fid,
                      struct VIOC **vioc,struct HEAD **rethead,
                      unsigned *idxblk)
@@ -359,7 +361,7 @@ unsigned update_addhead(struct VCB *vcb,char *filename,struct fiddef *back,
 
 /* update_create() will create a new file... */
 
-unsigned update_create(struct VCB *vcb,struct fiddef *did,char *filename,
+unsigned update_create(struct VCB *vcb,struct fiddef *did,const char *filename,
                        struct fiddef *fid,struct FCB **fcb)
 {
     struct VIOC *vioc;
@@ -423,8 +425,8 @@ unsigned update_extend(struct FCB *fcb,unsigned blocks,unsigned contig)
     }
     sts = bitmap_search(vcbdev,&start_pos,&block_count);
     printf("Update_extend %d %d\n",start_pos,block_count);
-    if (sts & 1) {
-        if (block_count < 1 || contig && block_count * vcbdev->clustersize < blocks) {
+    if ( (sts & 1)) {
+        if (block_count < 1 || (contig && block_count * vcbdev->clustersize < blocks)) {
             sts = SS$_DEVICEFULL;
         } else {
             register unsigned short *mp;
