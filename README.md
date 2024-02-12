@@ -26,8 +26,17 @@ The changes I made:
 * Report text description of RMS error message(s) in addition to the error number (didn't add text for others).
 * Quite a bit of re-work to sys_get() and the copy command in ods2.
 
-NOTE: As of Feb 11, 2024, there continues to be an error in the handling of file extents if they exceed the default (20).
-As a workaround, I set the EXTMAX to 100 which made it work with the images I had as samples.
+**NOTE 1: As of Feb 11, 2024, there continues to be an error in the handling of file extents if they exceed the default (20).
+As a workaround, I set EXTMAX to 100 in makefile.linux which made it work with the images I had as samples. Your mileage may vary.**
+
+**NOTE 2: As an option to help recover files when copying `*.*`, if a record's format is VAR but the attributes are 0 (none), then the file is copied in binary.
+Which means it will output the 2 byte record count, little endian, along with the record's data. That leaves the record structure in place. This will be indicated
+by having the text `.binary` appended to the filename. I.e. if the source file was FOO.BAR, the result file will be FOO.BAR.binary.**
+
+**NOTE 3: If while copying a file with a format of VAR or VFC and the record's count is bad and the /IGNORE copy option has been selected, the file will continue
+to be copied but as binary. This means the bad record count and all remaining data will be copied to the output unchanged with nothing further omitted or added.
+This action will be indicated by having the text `.corrupt_at_offset_xx` appended to the output's filename where `xx` is the offset in bytes from the start of
+the output file. I.e. if the source file was FOO.BAR and it had an error at the output file's offset 1234, the output filename would be `FOO.BAR.corrupt_at_offset_1234`.
 
 ## Building on Linux
 ```

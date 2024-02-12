@@ -313,7 +313,8 @@ unsigned dir(int argc,char *argv[],int qualc,char *qualv[])
                     }
 					if ( (options & OPT_DIR_FULL) )
 					{
-						uint64_t fSize;
+						/* keep the compiler happy about using ll in format string on 32 bit systems */
+						unsigned long long fSize;
 						char ratsBuf[100];
 						const char *rfmType;
 						rfmType = getRfmAndRats(&fab,ratsBuf,sizeof(ratsBuf));
@@ -322,7 +323,7 @@ unsigned dir(int argc,char *argv[],int qualc,char *qualv[])
 							++fSize;
 						fSize *= 512;
 						fSize += fhc.xab$w_ffb-512;
-						printf("\n\tfab: fns=%d, dns=%d, alq=%d, deq=%d, mrs=%d, org=%d, rat=0x%X(%s), rfm=%d(%s), size in bytes: %lu."
+						printf("\n\tfab: fns=%d, dns=%d, alq=%d, deq=%d, mrs=%d, org=%d, rat=0x%X(%s), rfm=%d(%s), size in bytes: %llu."
 							   ,fab.fab$b_fns	// Filespec size
 							   ,fab.fab$b_dns	// Filespec size
 							   ,fab.fab$l_alq	// Allocation qty (blocks)

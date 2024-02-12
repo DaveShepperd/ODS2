@@ -778,8 +778,12 @@ static int getFileData(const char *title, FileData_t *filePtr, int fresh)
     if ((sts & 1) == 0) {
         if ( sts == SS$_ENDOFFILE )
         {
-            printf("getFileData(): %s - Unexpected EOF detected. block=0x%X, fbIndex=0x%X, eofByte=0x%lX, nextByte=0x%lX\n",
-                   title?title:"", filePtr->stBlock,filePtr->fbIndex,filePtr->eofByte,filePtr->nextByte);
+			/* Keep compiler happy about using ll in format string on 32 bit systems */
+			unsigned long long eof,nxt;
+			eof = filePtr->eofByte;
+			nxt = filePtr->nextByte;
+            printf("getFileData(): %s - Unexpected EOF detected. block=0x%X, fbIndex=0x%X, eofByte=0x%llX, nextByte=0x%llX\n",
+                   title?title:"", filePtr->stBlock,filePtr->fbIndex,eof,nxt);
             sts = RMS$_EOF;
         }
         return sts;
@@ -966,7 +970,7 @@ unsigned sys_get(struct RAB *rab)
                     reclen -= fsz;  /* remove the VFC bytes from record length */
                 } while (0);
                 if ( msg[0] )
-                    printf(msg);
+                    fputs(msg,stdout);
                 if ( !(sts&1) )
                     return sts;
             }
