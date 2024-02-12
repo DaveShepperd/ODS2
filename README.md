@@ -36,7 +36,7 @@ by having the text `.binary` appended to the filename. I.e. if the source file w
 **NOTE 3: If while copying a file with a format of VAR or VFC and the record's count is bad and the /IGNORE copy option has been selected, the file will continue
 to be copied but as binary. This means the bad record count and all remaining data will be copied to the output unchanged with nothing further omitted or added.
 This action will be indicated by having the text `.corrupt_at_offset_xx` appended to the output's filename where `xx` is the offset in bytes from the start of
-the output file. I.e. if the source file was FOO.BAR and it had an error at the output file's offset 1234, the output filename would be `FOO.BAR.corrupt_at_offset_1234`.
+the output file. I.e. if the source file was FOO.BAR and it had an error at the output file's offset 1234, the output filename would be `FOO.BAR.corrupt_at_offset_1234`.**
 
 ## Building on Linux
 ```
