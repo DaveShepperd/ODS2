@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <memory.h>
 #include <ctype.h>
+#include <string.h>
 
 #define NO_DOLLAR
 #define RMS$INITIALIZE          /* used by rms.h to create templates */

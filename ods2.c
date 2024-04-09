@@ -1,6 +1,6 @@
 #define MODULE_NAME	ODS2
 
-/*     Ods2.c v1.3   Mainline ODS2 program   */
+/*     Ods2.c v1.6   Mainline ODS2 program   */
 
 /*
         This is part of ODS2 written by Paul Nankervis,
@@ -130,7 +130,11 @@
 
 #define PRINT_ATTR (FAB$M_CR | FAB$M_PRN | FAB$M_FTN)
 
-
+#if UNDER_MSYS2
+#define MKDIR(a,b) mkdir(a)
+#else
+#define MKDIR(a,b) mkdir(a,b)
+#endif
 
 /* keycomp: routine to compare parameter to a keyword - case insensitive! */
 
@@ -454,7 +458,7 @@ unsigned copy(int argc,char *argv[],int qualc,char *qualv[])
 								{
 									if ( !testMode )
 									{
-										if ( mkdir(name, 0777) )
+										if ( MKDIR(name, 0777) )
 										{
 											printf("%%COPY-E-MKDIR, failed mkdir('%s')\n",name);
 											sys_error_str(sts,errMsg,sizeof(errMsg)-1);
@@ -785,7 +789,13 @@ unsigned copy(int argc,char *argv[],int qualc,char *qualv[])
 										printf("%%COPY-I-utime: %s\n", errMsg);
 									}
 									else if ( (options&OPT_COPY_VERBOSE) )
+									{
+#if UNDER_MSYS2
+										printf("%%COPY-I-TIME, Reset times on '%s' to %llu\n", name, utb.actime );
+#else
 										printf("%%COPY-I-TIME, Reset times on '%s' to %lu\n", name, utb.actime );
+#endif
+									}
 								}
 							}
 #endif
