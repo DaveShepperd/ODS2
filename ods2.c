@@ -790,11 +790,7 @@ unsigned copy(int argc,char *argv[],int qualc,char *qualv[])
 									}
 									else if ( (options&OPT_COPY_VERBOSE) )
 									{
-#if UNDER_MSYS2
-										printf("%%COPY-I-TIME, Reset times on '%s' to %llu\n", name, utb.actime );
-#else
 										printf("%%COPY-I-TIME, Reset times on '%s' to %lu\n", name, utb.actime );
-#endif
 									}
 								}
 							}
