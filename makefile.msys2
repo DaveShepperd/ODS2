@@ -13,12 +13,13 @@ OPT = #-O
 DBG = -g
 WARN = -Wall -ansi -pedantic -Wwrite-strings
 STD = -std=gnu99 
+MACH = -m32
 LIBS = -lreadline
 CC = gcc
 LD = gcc
 RM = rm
 
-CCFLAGS = $(OPT) $(DBG) $(WARN) $(STD) $(DEFS)
+CCFLAGS = $(OPT) $(DBG) $(WARN) $(STD) $(MACH) $(DEFS)
 
 OBJS = ods2.o rms.o direct.o update.o access.o device.o phyunix.o cache.o vmstime.o
 
