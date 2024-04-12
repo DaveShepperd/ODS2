@@ -1,5 +1,11 @@
+# Set this to 0 if you don't have readline libs installed
+USE_READLINE = 1
+
+# Set this to 1 if building under MSYS2 on Windows
+UNDER_MSYS2 = 0
+
+# Comment out one or more of these lines if you experience compile errors
 DEFS  = -DUSE_GETTIME
-DEFS += -DUSE_READLINE
 DEFS += -D_LARGEFILE64_SOURCE
 DEFS += -D_FILE_OFFSET_BITS=64
 DEFS += -DUSE_STRERROR
@@ -12,12 +18,24 @@ OPT = #-O
 DBG = -g
 WARN = -Wall -ansi -pedantic -Wwrite-strings
 STD = -std=gnu99 
-LIBS = -lreadline
+MACH = 
 CC = gcc
 LD = gcc
 RM = rm
 
-CCFLAGS = $(OPT) $(DBG) $(WARN) $(STD) $(DEFS)
+LIBS = 
+
+ifeq ($(UNDER_MSYS2),1)
+	DEFS += -DUNDER_MSYS2
+	MACH += -m32
+endif
+ifeq ($(USE_READLINE),1)
+	DEFS += -DUSE_READLINE
+	LIBS += -lreadline
+endif
+
+CCFLAGS = $(OPT) $(DBG) $(WARN) $(STD) $(MACH) $(DEFS)
+LFLAGS = $(DBG) $(MACH)
 
 OBJS = ods2.o rms.o direct.o update.o access.o device.o phyunix.o cache.o vmstime.o
 
@@ -33,7 +51,7 @@ clean_all :
 	$(CC) -c $(CCFLAGS) $<
 
 ods2 : $(OBJS) makefile.linux
-	$(LD) $(DBG) -o $@ $(OBJS) $(LIBS)
+	$(LD) $(LFLAGS) -o $@ $(OBJS) $(LIBS)
 
 access.o : access.c ssdef.h access.h phyio.h makefile.linux
 cache.o : cache.c cache.h ssdef.h makefile.linux
