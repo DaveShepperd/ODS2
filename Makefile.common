@@ -1,0 +1,65 @@
+# Set this to 0 if you don't have readline libs installed
+
+# Comment out one or more of these lines if you experience compile errors
+DEFS  = -DUSE_GETTIME
+DEFS += -D_LARGEFILE64_SOURCE
+DEFS += -D_FILE_OFFSET_BITS=64
+DEFS += -DUSE_STRERROR
+DEFS += -DUSE_UTIME
+DEFS += -Dregister=""
+DEFS += -DEXTMAX=100
+#DEFS += -DDEBUG
+DEFS += $(EXTRA_DEFS)
+
+MAKEFILE = Makefile.common
+
+OPT = #-O
+DBG = -g
+WARN = -Wall -ansi -pedantic -Wwrite-strings
+STD = -std=gnu99 
+
+LIBS = 
+LIBS += $(EXTRA_LIBS)
+
+ifeq ($(USE_READLINE),1)
+	DEFS += -DUSE_READLINE
+	LIBS += -lreadline
+endif
+
+EXE =
+ifeq ($(MINGW),1)
+	EXE = .exe
+endif
+ifeq ($(MSYS2),1)
+	EXE = .exe
+endif
+
+CCFLAGS = $(OPT) $(DBG) $(WARN) $(STD) $(HOST_MACH) $(DEFS)
+LFLAGS = $(DBG) $(HOST_MACH)
+
+OBJS = ods2.o rms.o direct.o update.o access.o device.o phyunix.o cache.o vmstime.o
+
+all : ods2$(EXE)
+
+clean :
+	$(RM) ods2$(EXE) $(OBJS)
+
+clean_all :
+	$(RM)  ods2$(EXE) $(OBJS)
+
+%.o : %.c
+	$(CC) -c $(CCFLAGS) $<
+
+ods2$(EXE) : $(OBJS) $(MAKEFILE)
+	$(LD) $(LFLAGS) -o $@ $(OBJS) $(LIBS)
+
+access.o : access.c ssdef.h access.h phyio.h $(MAKEFILE)
+cache.o : cache.c cache.h ssdef.h $(MAKEFILE)
+device.o : device.c ssdef.h access.h phyio.h $(MAKEFILE)
+direct.o : direct.c direct.h access.h fibdef.h descrip.h ssdef.h $(MAKEFILE)
+ods2.o : ods2.c ssdef.h descrip.h access.h rms.h phyio.h version.h $(MAKEFILE)
+phyunix.o : phyunix.c phyio.h ssdef.h $(MAKEFILE)
+rms.o : rms.c rms.h direct.h access.h fibdef.h descrip.h ssdef.h $(MAKEFILE)
+update.o : update.c ssdef.h access.h $(MAKEFILE)
+vmstime.o : vmstime.c vmstime.h $(MAKEFILE)
+

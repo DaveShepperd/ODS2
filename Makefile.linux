@@ -1,0 +1,20 @@
+# This is for generic Linux. It expected to have the readline libs installed.
+# Do a:
+#	dnf intstall -y readline readline-devel
+# or
+#	apt install -y readline readline-devel
+# As appropriate for your system. Or set USE_READLINE to 0 if you
+# don't want command line edit and recall.
+
+USE_READLINE = 1
+EXTRA_DEFS = 
+LINUX = 1
+MINGW = 0
+MSYS2 = 0
+PIOS = 0
+HOST_MACH =
+CC = gcc
+LD = gcc
+RM = rm -f
+
+include Makefile.common

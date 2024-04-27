@@ -1,0 +1,17 @@
+# This is for MSYS2 on Windows. It expected there is a readline lib installed.
+# If you don't have it, I don't know what the package might be called to get it.
+# Set USE_READLINE=0 and remake. Readline gets you command line edit and recall but
+# otherwise it isn't necessary especially if you don't run ods2 in interactive mode.
+
+USE_READLINE = 1
+EXTRA_DEFS = -DMSYS2
+LINUX = 0
+MINGW = 0
+MSYS2 = 1
+PIOS = 0
+HOST_MACH = -m32
+CC = gcc
+LD = $(CC)
+RM = rm -f
+
+include Makefile.common

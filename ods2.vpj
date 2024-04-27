@@ -303,7 +303,19 @@
 			Filters=""
 			GUID="{50788F7D-61DD-456F-AB05-130F2E33182E}">
 			<F
-				N="makefile.linux"
+				N="Makefile.common"
+				Type="Makefile"/>
+			<F
+				N="Makefile.linux"
+				Type="Makefile"/>
+			<F
+				N="Makefile.mingw64"
+				Type="Makefile"/>
+			<F
+				N="Makefile.msys2"
+				Type="Makefile"/>
+			<F
+				N="Makefile.pi32"
 				Type="Makefile"/>
 			<F N="README.md"/>
 		</Folder>

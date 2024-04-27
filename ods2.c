@@ -130,7 +130,7 @@
 
 #define PRINT_ATTR (FAB$M_CR | FAB$M_PRN | FAB$M_FTN)
 
-#if UNDER_MSYS2
+#if MSYS2 || MINGW
 #define MKDIR(a,b) mkdir(a)
 #else
 #define MKDIR(a,b) mkdir(a,b)
@@ -790,7 +790,8 @@ unsigned copy(int argc,char *argv[],int qualc,char *qualv[])
 									}
 									else if ( (options&OPT_COPY_VERBOSE) )
 									{
-										printf("%%COPY-I-TIME, Reset times on '%s' to %lu\n", name, utb.actime );
+										unsigned long long hisTime = utb.actime;
+										printf("%%COPY-I-TIME, Reset times on '%s' to %llu\n", name, hisTime);
 									}
 								}
 							}
@@ -1602,7 +1603,7 @@ static void preLoadHistory(void)
 	sts = stat(READLINE_HISTORY_FILENAME,&st);
 	if ( sts )
 	{
-		perror("Unable to stat " READLINE_HISTORY_FILENAME ":");
+/*		perror("Unable to stat " READLINE_HISTORY_FILENAME ":"); */
 		return;
 	}
 	if ( st.st_size > 0 )

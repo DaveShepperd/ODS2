@@ -1,0 +1,18 @@
+# This is for MinGW64 on Windows. It expected there is no readline libs installed.
+# I don't know if they are available or what the package might be called if it is.
+# You are on your own with that. If you know you have the readline package installed,
+# set USE_READLINE=1 and remake. Readline gets you command line edit and recall but
+# otherwise it isn't necessary especially if you don't run ods2 in interactive mode.
+
+USE_READLINE = 0
+EXTRA_DEFS = -DMINGW
+LINUX = 0
+MINGW = 1
+MSYS2 = 0
+PIOS = 0
+HOST_MACH =
+CC = gcc
+LD = $(CC)
+RM = cmd /c del /s/q
+
+include Makefile.common
