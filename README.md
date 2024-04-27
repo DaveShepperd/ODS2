@@ -6,7 +6,9 @@ This is a version of ods2 written by Paul Nankervis (paulnank@au1.ibm.com) subse
 
 These sources were snatched from the github [HERE](https://github.com/crwolff/ods2) and hacked up quite a bit. I don't know how to contact crwolff to let him know.
 
-I only built and tested this version on a few different Linux systems. Specifically Fedora 39, Ubuntu, Ubuntu under WSL and PiOS v8 (32 bit version on a Pi5).
+I only built and tested this version on a few different Linux systems. Specifically Fedora 39, Ubuntu, Ubuntu under WSL and PiOS v8 (32 bit version on a Pi5). Added rules to build
+on Mingw-64 and MSYS2 (either 32 or 64 bit). It won't build under MinGw-32. The readline libs are a potential problem under Windows. You might want to always build with USE_READLINE=0 when
+building under MinGW and MSYS2. YMMV.
 
 The changes I made:
 
