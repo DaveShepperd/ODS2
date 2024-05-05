@@ -169,25 +169,39 @@ extern struct NAM cc$rms_nam;
 #define RAB$C_RFA 2	// index into block for next record to get
 
 /* Flags found in rab$w_flg */
-#define RAB$M_SPC 1		/* Read STREAM records as just raw data similar to fixed but not exactly like fixed */
-#define RAB$M_FAL 2		/* Continue reading file on record count error. Set RAB$M_RCE and rab$l_tot becomes frozen at that place */
-#define RAB$M_RCE 4		/* Set in rab$w_flg by sys_get() when record count error found. Rest of file is plain binary */
+#define RAB$M_BIN 		 0x0001	/* Read record strictly as binary. Ignore VAR/VFC/STREAM formatting */
+#define RAB$M_VFC 		 0x0002	/* Do VFC record header and trailer processing on VFC records else just normal newline */
+#define RAB$M_RAT 		 0x0004	/* Do record header and trailer processing according to fab$b_rfm and fab$b_rat */
+#define RAB$M_FAL		 0x0008	/* Continue reading file on record count error. Set RAB$M_RCE and rab$l_tot becomes frozen at that place */
+#define RAB$M_RCE		 0x0010	/* Set in rab$w_flg by sys_get() when record count error found. Rest of file is plain binary */
+#define RAB$M_BUF_SHARED 0x0020	/* Record header and trailer shared with ubf */
+#define RAB$M_CRLF		 0x0040	/* Terminate records with crlf instead of just nl */
+#define RAB$M_RETRY		 0x0080	/* Retry the file read/write but in binary */
+#define RAB$M_NOTAG		 0x0100	/* Do not rename output file */
+/*#define RAB$M_VARMRS	 0x0200    Record MRS in VAR type records (Too complicated for little gain. Never mind) */
+
+#define MAX_RMSREC 32767
 
 struct RAB {
-    struct FAB *rab$l_fab;
-    char *rab$l_ubf;
-    char *rab$l_rhb;
-    char *rab$l_rbf;
-    unsigned rab$w_usz;
-    unsigned rab$w_rsz;
-    int rab$b_rac;
-    unsigned rab$l_tot;			/* total bytes read from file so far. */
+    struct FAB *rab$l_fab;		/* Pointer to file's FAB */
+	unsigned char *rab$l_rhb;	/* Pointer to place VFC bytes if there are any (should always be set to what's in ubf-2) */
+    unsigned char *rab$l_ubf;	/* Pointer to buffer into which to read record */
+    unsigned char *rab$l_rbf;	/* Pointer to buffer to write */
+	unsigned int rab$l_tot;		/* total bytes read from file so far. */
+    unsigned short rab$w_usz;	/* Size of ubf buffer (make sure it's always at least MAXREC+128+2 bytes) */
+    unsigned short rab$w_rsz;	/* Number of bytes read or number of bytes to write */
+	unsigned short rab$w_eor;	/* index into ubf where eor chars are stored */
     unsigned short rab$w_flg;		/* Custom record processing flag(s) */
-    unsigned short rab$w_rfa[3];
+	unsigned short rab$w_tmpmrs;	/* Temporary holder for mrs calculations */
+    unsigned short rab$w_rfa[3];	/* Where in file next byte is to be fetches */
+	unsigned char rab$b_rhbSiz;	/* Size of rhb buffer (should always be set to 2) */
+	unsigned char rab$b_vfcs;	/* Number of vfc bytes discovered */
+	unsigned char rab$b_horBytes; /* Number of head of record bytes (those put in rhb) */
+	unsigned char rab$b_eorBytes; /* Number of end of record bytes placed in ubf */
 };
 
 #ifdef RMS$INITIALIZE
-struct RAB cc$rms_rab = {NULL,NULL,NULL,NULL,0,0,0,0,0,{0,0,0}};
+struct RAB cc$rms_rab = {NULL,NULL,NULL,NULL,0,0,0,0,0,0,{0,0,0},0,0,0,0};
 #else
 extern struct RAB cc$rms_rab;
 #endif
@@ -203,6 +217,7 @@ extern struct RAB cc$rms_rab;
 #define FAB$M_CR  2
 #define FAB$M_PRN 4
 #define FAB$M_BLK 8
+#define PRINT_ATTR (FAB$M_CR | FAB$M_PRN | FAB$M_FTN)
 
 #define FAB$M_PUT 0x1
 #define FAB$M_GET 0x2
@@ -248,6 +263,12 @@ struct FAB cc$rms_fab = {NULL,0,NULL,NULL,0,0,0,0,0,0,0,0,0,0,0,0,0,NULL};
 extern struct FAB cc$rms_fab;
 #endif
 
+#define CMD_VERBOSE_DIR	(0x0001)	/* Directory operations */
+#define CMD_VERBOSE_RD	(0x0002)	/* Read operations */
+#define CMD_VERBOSE_WR	(0x0004)	/* Write operations */
+#define CMD_VERBOSE_FN	(0x0008)	/* Filename parsing */
+#define CMD_VERBOSE_MAX	(0x0010)	/* Maximum flag */
+extern int cmdVerbose;
 
 #ifndef NO_DOLLAR
 #define sys$search      sys_search
@@ -278,4 +299,6 @@ unsigned sys_extend(struct FAB *fab);
 unsigned sys_setddir(struct dsc_descriptor *newdir,unsigned short *oldlen,
                      struct dsc_descriptor *olddir);
 void sys_error_str(int rmsSts, char *dest, int destLen);
+char *sys_getFileName(const struct FAB *fab, char *dest, int destLen);
+
 #endif

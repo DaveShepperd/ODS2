@@ -4,12 +4,12 @@
 # otherwise it isn't necessary especially if you don't run ods2 in interactive mode.
 
 USE_READLINE = 1
-EXTRA_DEFS = -DMSYS2
+EXTRA_DEFS = -DMSYS2 -DWIN32
 LINUX = 0
 MINGW = 0
 MSYS2 = 1
 PIOS = 0
-HOST_MACH = -m32
+HOST_MACH = 
 CC = gcc
 LD = $(CC)
 RM = rm -f

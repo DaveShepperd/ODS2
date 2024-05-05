@@ -34,11 +34,11 @@ int tab(char *in_filename,char *out_filename,int in_size,int out_size,
 	exit(EXIT_FAILURE);
     }
     if (out_size < 1) out_size = in_size;
-    if ((in_file = fopen(in_filename,"r")) == NULL) {
+    if ((in_file = fopen(in_filename,"rb")) == NULL) {
 		perror("Input error: ");
 		printf("Cannot open input file %s\n",in_filename);
     } else {
-	if ((out_file = fopen(out_filename,"w")) == NULL) {
+	if ((out_file = fopen(out_filename,"wb")) == NULL) {
 		perror("Output error: ");
 	    printf("Cannot open output file %s\n",out_filename);
 	} else {

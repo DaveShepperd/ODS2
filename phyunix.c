@@ -34,6 +34,14 @@
 #endif
 #endif
 
+#if WIN32
+#define OPEN_FLAGS O_RDONLY|O_BINARY
+#define OPEN_RW_FLAGS O_RDWR|O_BINARY
+#else
+#define OPEN_FLAGS O_RDONLY
+#define OPEN_RW_FLAGS O_RDWR
+#endif
+
 unsigned init_count = 0;
 unsigned read_count = 0;
 unsigned write_count = 0;
@@ -154,8 +162,8 @@ unsigned phyio_init(int devlen,char *devnam,unsigned *handle,struct phyio_info *
     if (cp != NULL) *cp = '\0';
 
     /* try to open file without '/dev/' prefix */
-    vmsfd = open(devbuf,O_RDWR);
-    if (vmsfd < 0) vmsfd = open(devbuf,O_RDONLY);
+    vmsfd = open(devbuf,OPEN_RW_FLAGS);
+    if (vmsfd < 0) vmsfd = open(devbuf,OPEN_FLAGS);
 
     if (vmsfd < 0)
     {
@@ -163,8 +171,8 @@ unsigned phyio_init(int devlen,char *devnam,unsigned *handle,struct phyio_info *
         sprintf(devbuf,DEV_PREFIX,devnam);
         cp = strchr(devbuf,':');
         if (cp != NULL) *cp = '\0';
-        vmsfd = open(devbuf,O_RDWR);
-        if (vmsfd < 0) vmsfd = open(devbuf,O_RDONLY);
+        vmsfd = open(devbuf,OPEN_RW_FLAGS);
+        if (vmsfd < 0) vmsfd = open(devbuf,OPEN_FLAGS);
     }
     else
     {

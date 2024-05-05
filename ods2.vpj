@@ -10,7 +10,8 @@
 		DebugCallbackName="gdb"
 		Version="1"
 		OutputFile="%bdods2"
-		CompilerConfigName="Latest Version">
+		CompilerConfigName="Latest Version"
+		Defines="">
 		<Menu>
 			<Target
 				Name="Compile"
@@ -21,7 +22,7 @@
 				OutputExts="*.o"
 				SaveOption="SaveCurrent"
 				RunFromDir="%rw">
-				<Exec CmdLine='gcc -ansi -c %xup  %defd -g -o "%bd%n%oe" %i "%f"'/>
+				<Exec CmdLine='gcc -c %xup -ansi %defd -g -o "%bd%n%oe" %i %f'/>
 			</Target>
 			<Target
 				Name="Link"
@@ -32,7 +33,9 @@
 				Deletable="0"
 				SaveOption="SaveCurrent"
 				RunFromDir="%rw">
-				<Exec CmdLine='gcc -ansi %xup -g -o "%o" %f %libs'/>
+				<Exec
+					CmdLine='gcc %xup -g %~other -o "%o" %objs'
+					OtherOptions="-lreadline"/>
 			</Target>
 			<Target
 				Name="Build"
@@ -128,6 +131,8 @@
 				Name="LinkerOutputType"
 				Value="Executable"/>
 		</List>
+		<Includes/>
+		<Libs PreObjects="0"/>
 	</Config>
 	<Config
 		Name="Release"
@@ -135,7 +140,8 @@
 		DebugCallbackName="gdb"
 		Version="1"
 		OutputFile="%bdods2"
-		CompilerConfigName="Latest Version">
+		CompilerConfigName="Latest Version"
+		Defines="">
 		<Menu>
 			<Target
 				Name="Compile"
@@ -146,7 +152,7 @@
 				OutputExts="*.o"
 				SaveOption="SaveCurrent"
 				RunFromDir="%rw">
-				<Exec CmdLine='gcc -ansi -c %xup %defd -o "%bd%n%oe" %i "%f"'/>
+				<Exec CmdLine='gcc -c %xup -ansi %defd -o "%bd%n%oe" %i %f'/>
 			</Target>
 			<Target
 				Name="Link"
@@ -157,7 +163,9 @@
 				Deletable="0"
 				SaveOption="SaveCurrent"
 				RunFromDir="%rw">
-				<Exec CmdLine='gcc -ansi %xup -o "%o" %f %libs'/>
+				<Exec
+					CmdLine='gcc %xup %~other -o "%o" %objs'
+					OtherOptions="-lreadline"/>
 			</Target>
 			<Target
 				Name="Build"
@@ -253,6 +261,8 @@
 				Name="LinkerOutputType"
 				Value="Executable"/>
 		</List>
+		<Includes/>
+		<Libs PreObjects="0"/>
 	</Config>
 	<Files>
 		<Folder
@@ -288,6 +298,7 @@
 			<F N="rms.h"/>
 			<F N="scsidefs.h"/>
 			<F N="ssdef.h"/>
+			<F N="version.h"/>
 			<F N="vmstime.h"/>
 		</Folder>
 		<Folder

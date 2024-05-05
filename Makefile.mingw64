@@ -5,12 +5,12 @@
 # otherwise it isn't necessary especially if you don't run ods2 in interactive mode.
 
 USE_READLINE = 0
-EXTRA_DEFS = -DMINGW
+EXTRA_DEFS = -DMINGW -DWIN32
 LINUX = 0
 MINGW = 1
 MSYS2 = 0
 PIOS = 0
-HOST_MACH =
+HOST_MACH = -m32
 CC = gcc
 LD = $(CC)
 RM = cmd /c del /s/q
