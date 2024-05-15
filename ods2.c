@@ -904,9 +904,11 @@ unsigned copy(int argc, char *argv[], int qualc, char *qualv[])
 								rab.rab$w_flg |= RAB$M_BIN;
 							break;
 						case FAB$C_FIX:
+#if 0
 							if ( (fab.fab$b_rat & PRINT_ATTR) )
 								rab.rab$w_flg |= RAB$M_RAT;
 							else
+#endif
 								rab.rab$w_flg |= RAB$M_BIN;
 							break;
 						default:
@@ -970,7 +972,7 @@ unsigned copy(int argc, char *argv[], int qualc, char *qualv[])
 								nLen += snprintf(newFName+sLen, nFNLen, "%c%s%c%d%s", cDelim, rfm, cDelim, fab.fab$w_mrs, ratsBuf);
 							if ( (rab.rab$w_flg&RAB$M_RETRY) || ((rab.rab$w_flg & (RAB$M_FAL | RAB$M_RCE)) == (RAB$M_FAL | RAB$M_RCE)) )
 							{
-								nLen += snprintf(newFName + sLen + nLen, nFNLen - nLen, "%ccorrupt_at_offset_%d", cDelim, rab.rab$l_tot);
+								nLen += snprintf(newFName + sLen + nLen, nFNLen - nLen, "%cisCorruptAt%c%d", cDelim, cDelim, rab.rab$l_tot);
 							}
 							if ( rename(name, newFName) < 0 )
 							{
