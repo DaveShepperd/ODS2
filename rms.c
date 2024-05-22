@@ -984,6 +984,10 @@ static int handleEndOfRecord(FileData_t *fileData)
 
 		vfc0 = rab->rab$l_rhb[0];
 		vfc1 = rab->rab$l_rhb[1];
+#if 0
+		if ( (cmdVerbose&CMD_VERBOSE_EOL) )
+			printf("EOL: rab$w_flg=0x%04X, vfc0=0x%02X, vfc1=0x%02X\n", rab->rab$w_flg, vfc0, vfc1);
+#endif
 		rab->rab$l_rhb[0] = 0;
 		rab->rab$l_rhb[1] = 0;
 		recPtr = rab->rab$l_rhb;
@@ -1076,6 +1080,10 @@ static int handleEndOfRecord(FileData_t *fileData)
 	{
 		/* Not VFC */
 		recPtr = rab->rab$l_ubf;
+#if 0
+		if ( (cmdVerbose&CMD_VERBOSE_EOL) )
+			printf("EOL: rab$w_flg=0x%04X, CRLF=%s\n", rab->rab$w_flg, (rab->rab$w_flg & RAB$M_CRLF) ? "Yes":"No");
+#endif
 		if ( (rab->rab$w_flg & RAB$M_CRLF) )
 		{
 			if ( rcdLen + 1 <= rab->rab$w_usz - 1 )

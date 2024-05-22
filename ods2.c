@@ -499,15 +499,15 @@ static RW_Sts_t copy_rw(RW_Params_t *params, int retry)
 	if ( !params->testMode )
 	{
 		tof = fopen(params->outFileName, "wb");
-	}
-	if ( !params->testMode && tof == NULL )
-	{
-#if USE_STRERROR
-		printf("-COPY-I-FOPEN, Could not open %s for output: %s\n", params->outFileName, strerror(errno));
-#else
-		printf("-COPY-I-FOPEN, Could not open %s for output: errno=%d\n", params->outFileName, errno);
-#endif
-		return RW_Sts_Fatal;
+		if ( tof == NULL )
+		{
+	#if USE_STRERROR
+			printf("-COPY-I-FOPEN, Could not open %s for output: %s\n", params->outFileName, strerror(errno));
+	#else
+			printf("-COPY-I-FOPEN, Could not open %s for output: errno=%d\n", params->outFileName, errno);
+	#endif
+			return RW_Sts_Fatal;
+		}
 	}
 	SCacheEna = 0;
 	sts = RMS$_EOF;
@@ -575,11 +575,21 @@ static RW_Sts_t copy_rw(RW_Params_t *params, int retry)
 				if ( tof && (cmdVerbose&CMD_VERBOSE_WR) )
 				{
 					unsigned char *uRecPtr = (unsigned char *)recPtr;
+					char tmpBuf[128];
+					int ii, dLen;
 					printf("%%COPY-I-WRITE, wrote a total of %d(0x%X) bytes. recPtr=%p, rcdLen=%d(0x%X), rab$w_flg=0x%X. goodRecords=%d, badRecords=%d\n",
 						   params->totWrite, params->totWrite, (void *)recPtr, rcdLen, rcdLen, params->rab->rab$w_flg, params->records, params->badRecords);
-					printf("\tbuff (%p): %02X %02X %02X %02X %02X %02X %02X %02X\n",
-						   (void *)uRecPtr, uRecPtr[0], uRecPtr[1], uRecPtr[2], uRecPtr[3], uRecPtr[4], uRecPtr[5], uRecPtr[6], uRecPtr[7]);
-
+					dLen = 0;
+					for (ii=0; ii < rcdLen; ++ii)
+					{
+						dLen += snprintf(tmpBuf+dLen,sizeof(tmpBuf)-dLen," %02X", uRecPtr[ii]);
+						if ( ii == 3 && rcdLen > 8 )
+						{
+							dLen += snprintf(tmpBuf+dLen,sizeof(tmpBuf)-dLen," ...");
+							ii = rcdLen - 4 -1;
+						}
+					}
+					printf("\tbuff (%p): %s\n", (void *)uRecPtr, tmpBuf);
 				}
 			}
 		}
