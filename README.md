@@ -37,31 +37,49 @@ meta data is appended to the file name. Not always, but in the cases where it wo
 format is FIXED whether or not there are record attributes or the format VAR or VFC and there are no record attributes. Or if during
 recovery of a VAR/VFC format file the record count is corrupt or otherwise in error. Note in all those cases the file is copied without
 modification. I.e. in binary mode. It is left as a exercise to the reader to further decode the file's contents. As an example, a recovered
-file might appear as 
+file might appear as name.ext;ver;RFM;MRS;RAT(s) where 'name' is the filename, 'exe' is the file's extension, 'ver' is the file version number
+'RFM' is the record format (one of UNDEF, FIXED, VAR, VFC, STMCRLF, STMLF, STMCR), 'MRS' is maximum record size (actual record size if RFM=FIXED),
+'RAT(s)' are the record attributes (one or more of FTN, CR, PRN or BLK) indicating how the record should be terminated. The ';'s will be replaced
+with the delimiter as provided by the --delim command line option.**
 
-**NOTE 2: As an option to help recover files when copying `*.*`, if a record's format is VAR but the attributes are 0 (none), then the file is copied in binary.
-Which means it will output the 2 byte record count, little endian, along with the record's data. That leaves the record structure in place. This will be indicated
-by having the text `.binary` appended to the filename. I.e. if the source file was FOO.BAR, the result file will be FOO.BAR.binary.**
+**NOTE 3: As an option to help recover files when copying, if a record's format is VAR/VFC but the attributes are 0 (none) or there was a problem
+with the record's length (corruption), then the entire file is copied in binary. Which means it will output the 2 byte record count, little endian, along
+with the record's data. That leaves the record structure in place. This will be indicated by having the record format appended to the filename as shown
+in the NOTE 2 above. If the record count is the problem, additional text ';isCorruptAt;n' is appeneded to the filename where 'n' is the offset in the
+file where the first instance of a bad record count was found.**
 
-**NOTE 3: If while copying a file with a format of VAR or VFC and the record's count is bad and the /IGNORE copy option has been selected, the file will continue
-to be copied but as binary. This means the bad record count and all remaining data will be copied to the output unchanged with nothing further omitted or added.
-This action will be indicated by having the text `;isCorruptAt;xx` appended to the output's filename where `xx` is the offset in bytes from the start of
-the output file. I.e. if the source file was FOO.BAR and it had an error at the output file's offset 1234, the output filename would be `FOO.BAR.corrupt_at_offset_1234`.**
+**NOTE 4: Look in fileFormats.html for some details about how VMS file formats are stored on disk.**
 
 ## Building on Linux
 ```
-make -f makefile.linux
+make -f Makefile.linux
+```
+## Building on Windows under MinGW64
+```
+make -f Makefile.mingw64
+```
+## Building on Windows under Msys2
+```
+make -f Makefile.msys2
+```
+## Building on PiOS
+```
+make -f Makefile.pios32
 ```
 ## Building on Unix
 ```
-make -f makefile.unix
+make -f makefile.unix (hasn't been tested. Might not work anymore)
 ```
 ## Usage
 ### Mount CD/DVD/Disk image
 ```
+(NOTE: All filenames have to be expressed in VMS syntax. So no '/'s or '\'s can appear in them;
+On Linux and Unix I suggest one use symlinks in the current default directory.
+I don't know what to suggest as a workaround on Windows systems.
+This means the second example won't work).
 $> mount sr0
-$> mount /dev/sr0
-$> mount <image_file>
+$> mount /dev/sr0     (This won't actually work due to the '/'s)
+$> mount <image_file> (Likewise, make sure there are no '/'s or '\'s here either)
 ```
 ### Navigate contents
 ```
