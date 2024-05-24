@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <!--    <link rel="stylesheet" href="style.css"> -->
+  <title>VMSBACKUP</title>
+  <style>
+  table {
+    border-collapse: collapse;
+    width: 50%;
+  }
+  
+  th, td {
+    text-align: left;
+    padding: 2px;
+  }
+  
+  tr:nth-child(even) {
+    background-color: #D6EEEE;
+  }
+  .TblCntr table
+  {
+		margin: 10px;
+		border:1px solid #000;
+    border-collapse: collapse;
+    width: 50%;
+    align: left;
+  }
+  .TblCntr tr
+  {
+    border: 2px solid white;
+  }
+  .TblCntr th
+  {
+    border: 2px solid white;
+    text-align: center;
+    padding: 2px;
+  }
+  .TblCntr td
+  {
+    border: 2px solid white;
+    text-align: center;
+    padding: 2px;
+  }
+  .TblCntr tr:nth-child(even)
+  {
+      background-color: #D6EEEE;
+  }
+	.Tbl3 td:nth-of-type(3n+1),th:nth-of-type(3n+1)
+	{
+			text-align: center;
+	}
+	.Tbl3 th:nth-of-type(3n+2)
+	{
+			text-align: center;
+	}
+	.Tbl3 td:nth-of-type(3n+3),th:nth-of-type(3n+3)
+	{
+			text-align: left;
+	}
+	.Tbl2 td:nth-of-type(2n+1),th:nth-of-type(2n+1)
+	{
+			text-align: center;
+	}
+  </style>
+</head>
+<body>
+<div style="width: 25%;text-align:center;">
+  <h1>VMS VAR and VFC File Formats</h1>
+</div>
+<em style="color:red">NOTE:</em>
+<em>If an invalid length is discovered in a VAR or VFC record the file will be renamed
+x.x[;version];format;size;att;isCorruptAt;x where 'format' will be one of VAR or VFC,
+'size' will be the length of the longest record, 'att' will hold one or more of the attributes (NONE, CR, FTN, PRN, BLK)
+and 'x' is the byte offset in the file where the invalid record can be found. It is expected
+a custom built application (not provided) is to be used to attempt to extract as much of the files's
+content as possible.
+</em>
+  </pre>
+  <h2>Record formats</h2>
+  <p>
+  In case one does not know already, the binary format of VAR (and VFC) format records is:
+  </p>
+  <table class="Tbl2">
+    <tr>
+    <th>Byte Offset</th><th>Description</th>
+    </tr>
+    <tr>
+    <td>0</td><td>Least significant bits of 16 bit record count (n&0xFF)</td>
+    </tr>
+    <tr>
+    <td>1</td><td>Most significatn bits of 16 bit record count (n&gt;&gt;8)</td>
+    </tr>
+    <tr>
+    <td>...</td><td>n bytes of record content.</td>
+    </tr>
+    <tr>
+    <td>n+2</td><td>an Optional byte. Only present if n is odd.</td>
+    </tr>
+  </table>
+  <p>
+  If n is zero, the record will consist of just the two byte count. A record count greater than 0x7FFF (32767) is always illegal. Technically, in the case of ods2 restoring a file,
+  a legal record count will never be greater than the maximimu record size listed in the file's meta data which will be reported in the directory listing (/FULL).
+  </p>
+  <p>
+  I.e. If the record is of the ASCII "HELLO", the bytes in the record will be (in hex):
+  </p>
+  <pre>
+  05 00 48 45 4C 4C 4F xx
+  </pre>
+  <p>
+  where 'xx' is a filler byte, probably 00. It is not included in the record count but it is just to ensure the record count of the next record is on an even byte bounday.
+  </p>
+  <p>
+  A blank line will contain:
+  </p>
+  <pre>
+  00 00
+  </pre>
+  <p>
+  The format of the VFC files is nearly the same as VAR above. The only difference is there are n bytes of fortran carriage control bytes following the 2 bytes of record size.
+  The VFC bytes are included in the record's size. In all the cases I've seen with this, there have only ever been 2 bytes of VFC. The format will be listed in the directory
+  and filenames as VFCx with the 'x' being the number of VFC bytes (always 2 as far as I've seen as mentioned) but if there is a different number of bytes, the 'x' will be set
+  accordingly.
+  </p>
+  <p>
+  In the case of a 2 byte VFC, the value of the first byte (vfc0) ID's the start of the output according to:
+  </p>
+  <table class="Tbl2">
+    <tr>
+    <th>Char</th><th>Description</th>
+    </tr>
+    <tr>
+    <td>0</td><td>(as in nul) no leading carriage control</td>
+    </tr>
+    <tr>
+    <td>' '</td><td>(ASCII space) Normal: \n followed by text followed by \r</td>
+    </tr>
+    <tr>
+    <td>'$'</td><td>(ASCII dollar) Prompt: \n followed by text, no \r at end of line</td>
+    </tr>
+    <tr>
+    <td>'+'</td><td>(ASCII plus) Overstrike: text followed by \r</td>
+    </tr>
+    <tr>
+    <td>'0'</td><td>(ASCII zero) Double space: \n \n followed by text followed by \r</td>
+    </tr>
+    <tr>
+    <td>'1'</td><td>(ASCII one) Formfeed: \f followed by text followed by \r</td>
+    </tr>
+    <tr>
+    <td>any</td><td>(any other) same as Normal above</td>
+    </tr>
+  </table>
+  <p>
+  Despite the comments above about the end-of-record carriage control, it is actually determined by the second byte (vfc1) and handled separately as:
+  </p>
+  <table class="Tbl2">
+    <tr>
+    <th>Bit in byte</th><th></th>
+    </tr>
+    <tr>
+    <th>7 6 5 4 3 2 1 0</th><th>Description</th>
+    </tr>
+    <tr>
+    <td>0 0 0 0 0 0 0 0</td><td>no trailing carriage control</td>
+    </tr>
+    <tr>
+    <td>0 x x x x x x x</td><td>bits 6-0 indicate how many nl's to output followed by a cr</td>
+    </tr>
+    <tr>
+    <td>1 0 0 x x x x x</td><td>bits 4-0 describe the end-of-record char (normally a 0x0D)</td>
+    </tr>
+    <tr>
+    <td>1 0 1 * * * * *</td><td>just one cr</td>
+    </tr>
+    <tr>
+    <td>1 1 0 0 x x x x</td><td>bits 3-0 describe bits to send to VFU. If no VFU, just one cr</td>
+    </tr>
+    <tr>
+    <td>1 1 0 1 * * * *</td><td>just one cr</td>
+    </tr>
+    <tr>
+    <td>1 1 1 * * * * *</td><td>just one cr</td>
+    </tr>
+  </table>
+  <p>
+  where 'x' can be 0 or 1 and means something and '*' means not used.
+  </p>
+  <p>
+  For example, if the VFC record is of a single line of ASCII "HELLO", the bytes in the record will probably be (in hex):
+  </p>
+  <pre>
+  07 00 01 8D 48 45 4C 4C 4F xx
+  </pre>
+  <p>
+  As with VAR, the xx is a filler byte.
+  </p>
+  <p>
+  Where vfc0 (0x01) indicates the leading character is "normal" and to output a newline (0x0A) and vfc1 (0x8D) indicates to output a 0x0D (carrage return) at the end of the record.
+  </p>
+</div>
+</body>
+</html>

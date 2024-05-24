@@ -273,6 +273,7 @@
 			<F N="cache.c"/>
 			<F N="device.c"/>
 			<F N="direct.c"/>
+			<F N="fileFormats.html"/>
 			<F N="ods2.c"/>
 			<F N="phynt.c"/>
 			<F N="phyunix.c"/>
